@@ -23,7 +23,7 @@ import {
   AlertTriangle, CheckCircle2, Calendar, FileText, ChevronRight,
   Sun, Moon, Activity, X, AlertCircle, RefreshCw, LogOut, User,
   Eye, Pencil, Trash2, Save, Download, BarChart3, History, Car,
-  Menu, Home, ClipboardList, PieChart,
+  Menu, Home, ClipboardList, PieChart, Pause, PlayCircle, Route,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -34,6 +34,16 @@ interface Event {
   workDayId: string;
   time: string;
   description: string;
+}
+
+interface DrivingSession {
+  id: string;
+  workDayId: string;
+  startTime: string;
+  endTime: string | null;
+  startKm: number | null;
+  endKm: number | null;
+  status: string;
 }
 
 interface WorkDay {
@@ -50,7 +60,9 @@ interface WorkDay {
   truckCheck: boolean;
   observations: string | null;
   matricula: string | null;
+  isPaused: boolean;
   events: Event[];
+  drivingSessions: DrivingSession[];
   kmTraveled: number | null;
   hoursWorked: number | null;
   totalEvents: number;
@@ -186,6 +198,13 @@ export default function DiarioMotorista() {
   const [deleteConfirm, setDeleteConfirm] = useState<WorkDay | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Estados para pausar/retomar condução
+  const [showPauseDialog, setShowPauseDialog] = useState(false);
+  const [showResumeDialog, setShowResumeDialog] = useState(false);
+  const [pauseKm, setPauseKm] = useState('');
+  const [resumeKm, setResumeKm] = useState('');
+  const [processingAction, setProcessingAction] = useState(false);
+
   // Mostrar toast
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning') => {
     setToast({ message, type });
@@ -269,6 +288,131 @@ export default function DiarioMotorista() {
     } catch {
       showToast('Erro ao sair', 'error');
     }
+  };
+
+  // ==================== PAUSAR / RETOMAR CONDUÇÃO ====================
+
+  // Calcular totais das sessões
+  const calculateSessionsTotals = (sessions: DrivingSession[]) => {
+    let totalKm = 0;
+    let totalMinutes = 0;
+
+    for (const session of sessions) {
+      if (session.startKm && session.endKm) {
+        totalKm += session.endKm - session.startKm;
+      }
+      if (session.startTime && session.endTime) {
+        const [startH, startM] = session.startTime.split(':').map(Number);
+        const [endH, endM] = session.endTime.split(':').map(Number);
+        const startMin = startH * 60 + startM;
+        const endMin = endH * 60 + endM;
+        totalMinutes += endMin > startMin ? endMin - startMin : (24 * 60 - startMin) + endMin;
+      }
+    }
+
+    return { totalKm, totalMinutes };
+  };
+
+  // Calcular tempo da sessão ativa
+  const calculateActiveSessionTime = () => {
+    if (!currentDay?.drivingSessions) return 0;
+    
+    const activeSession = currentDay.drivingSessions.find(s => s.status === 'active');
+    if (!activeSession) return 0;
+
+    const [startH, startM] = activeSession.startTime.split(':').map(Number);
+    const startMinutes = startH * 60 + startM;
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    
+    return nowMinutes >= startMinutes ? nowMinutes - startMinutes : (24 * 60 - startMinutes) + nowMinutes;
+  };
+
+  // Pausar condução
+  const handlePauseDriving = async () => {
+    if (!currentDay || !pauseKm) {
+      showToast('Informe o KM atual', 'warning');
+      return;
+    }
+
+    setProcessingAction(true);
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workDayId: currentDay.id,
+          action: 'pause',
+          km: pauseKm
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setShowPauseDialog(false);
+        setPauseKm('');
+        loadData();
+        showToast(data.message || 'Condução pausada', 'success');
+      } else {
+        const error = await res.json();
+        showToast(error.error || 'Erro ao pausar', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    } finally {
+      setProcessingAction(false);
+    }
+  };
+
+  // Retomar condução
+  const handleResumeDriving = async () => {
+    if (!currentDay || !resumeKm) {
+      showToast('Informe o KM atual', 'warning');
+      return;
+    }
+
+    setProcessingAction(true);
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workDayId: currentDay.id,
+          action: 'resume',
+          km: resumeKm
+        })
+      });
+
+      if (res.ok) {
+        setShowResumeDialog(false);
+        setResumeKm('');
+        loadData();
+        showToast('Condução retomada!', 'success');
+      } else {
+        const error = await res.json();
+        showToast(error.error || 'Erro ao retomar', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    } finally {
+      setProcessingAction(false);
+    }
+  };
+
+  // Abrir diálogo de pausa
+  const openPauseDialog = () => {
+    // Sugerir KM baseado no último KM conhecido
+    const lastSession = currentDay?.drivingSessions?.find(s => s.status === 'active');
+    if (lastSession?.startKm) {
+      setPauseKm(''); // Deixar em branco para o usuário preencher
+    }
+    setShowPauseDialog(true);
+  };
+
+  // Abrir diálogo de retomada
+  const openResumeDialog = () => {
+    setResumeKm('');
+    setShowResumeDialog(true);
   };
 
   // ==================== AÇÕES PRINCIPAIS ====================
@@ -992,19 +1136,37 @@ export default function DiarioMotorista() {
               /* DIA EM ANDAMENTO */
               <div className="space-y-4">
                 {/* Card Principal do Dia */}
-                <Card className="border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950 dark:to-slate-900">
+                <Card className={`${currentDay.isPaused ? 'border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950 dark:to-slate-900' : 'border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950 dark:to-slate-900'}`}>
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
                       <div>
-                        <Badge className="bg-emerald-600 mb-2">
-                          <Activity className="h-3 w-3 mr-1 animate-pulse" />
-                          DIA EM ANDAMENTO
+                        <Badge className={`${currentDay.isPaused ? 'bg-amber-600' : 'bg-emerald-600'} mb-2`}>
+                          {currentDay.isPaused ? (
+                            <>
+                              <Pause className="h-3 w-3 mr-1" />
+                              CONDUÇÃO PAUSADA
+                            </>
+                          ) : (
+                            <>
+                              <Activity className="h-3 w-3 mr-1 animate-pulse" />
+                              CONDUZINDO
+                            </>
+                          )}
                         </Badge>
                         <CardTitle>{formatDate(currentDay.date)}</CardTitle>
                       </div>
                       <div className="text-right">
-                        <p className="text-2xl font-bold font-mono">{calculateWorkingTime()}</p>
-                        <p className="text-xs text-muted-foreground">tempo de trabalho</p>
+                        {currentDay.isPaused ? (
+                          <>
+                            <p className="text-lg font-bold font-mono text-amber-600">PAUSADO</p>
+                            <p className="text-xs text-muted-foreground">colega no volante</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-2xl font-bold font-mono">{calculateWorkingTime()}</p>
+                            <p className="text-xs text-muted-foreground">tempo deste turno</p>
+                          </>
+                        )}
                       </div>
                     </div>
                   </CardHeader>
@@ -1018,53 +1180,120 @@ export default function DiarioMotorista() {
                         </Badge>
                       </div>
                     )}
-                    <div className="grid grid-cols-3 gap-4 mb-4">
-                      <div className="text-center p-2 bg-white/50 dark:bg-slate-800/50 rounded-lg">
-                        <Clock className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-                        <p className="text-sm font-semibold">{formatTime(currentDay.startTime)}</p>
-                        <p className="text-xs text-muted-foreground">Início</p>
-                      </div>
-                      <div className="text-center p-2 bg-white/50 dark:bg-slate-800/50 rounded-lg">
-                        <MapPin className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-                        <p className="text-sm font-semibold">{currentDay.startCountry || '--'}</p>
-                        <p className="text-xs text-muted-foreground">Local</p>
-                      </div>
-                      <div className="text-center p-2 bg-white/50 dark:bg-slate-800/50 rounded-lg">
-                        <Gauge className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-                        <p className="text-sm font-semibold">{currentDay.startKm?.toLocaleString() || '--'}</p>
-                        <p className="text-xs text-muted-foreground">KM</p>
-                      </div>
-                    </div>
                     
-                    {/* Status de conformidade */}
-                    <div className={`p-3 rounded-lg ${
-                      conformity.status === 'danger' ? 'bg-red-100 dark:bg-red-900/30' :
-                      conformity.status === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' :
-                      'bg-emerald-100 dark:bg-emerald-900/30'
-                    }`}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          {conformity.status === 'danger' && <AlertTriangle className="h-5 w-5 text-red-600" />}
-                          {conformity.status === 'warning' && <AlertTriangle className="h-5 w-5 text-amber-600" />}
-                          {conformity.status === 'ok' && <CheckCircle2 className="h-5 w-5 text-emerald-600" />}
-                          <span className={`text-sm font-medium ${
-                            conformity.status === 'danger' ? 'text-red-700 dark:text-red-300' :
-                            conformity.status === 'warning' ? 'text-amber-700 dark:text-amber-300' :
-                            'text-emerald-700 dark:text-emerald-300'
-                          }`}>
-                            {conformity.message || 'Dentro dos limites'}
+                    {/* Resumo dos Turnos */}
+                    {currentDay.drivingSessions && currentDay.drivingSessions.length > 0 && (
+                      <div className="mb-4 p-3 bg-white/50 dark:bg-slate-800/50 rounded-lg">
+                        <p className="text-xs font-medium text-muted-foreground mb-2">📊 Seus Turnos Hoje:</p>
+                        <div className="space-y-1">
+                          {currentDay.drivingSessions.map((session, idx) => {
+                            const sessionKm = session.startKm && session.endKm ? session.endKm - session.startKm : null;
+                            const sessionTime = session.startTime && session.endTime ? 
+                              (() => {
+                                const [startH, startM] = session.startTime.split(':').map(Number);
+                                const [endH, endM] = session.endTime.split(':').map(Number);
+                                const mins = (endH * 60 + endM) - (startH * 60 + startM);
+                                const h = Math.floor(Math.abs(mins) / 60);
+                                const m = Math.abs(mins) % 60;
+                                return `${h}h${m.toString().padStart(2, '0')}`;
+                              })() : null;
+                            
+                            return (
+                              <div key={session.id} className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">
+                                  {idx + 1}º Turno: {session.startTime} → {session.endTime || 'agora'}
+                                </span>
+                                <span className="font-medium">
+                                  {sessionTime || '--:--'} | {sessionKm ? `${sessionKm}km` : '--km'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-2 pt-2 border-t flex justify-between text-sm font-semibold">
+                          <span>Total:</span>
+                          <span>
+                            {(() => {
+                              const totals = calculateSessionsTotals(currentDay.drivingSessions);
+                              const h = Math.floor(totals.totalMinutes / 60);
+                              const m = totals.totalMinutes % 60;
+                              return `${h}h${m.toString().padStart(2, '0')} | ${totals.totalKm}km`;
+                            })()}
                           </span>
                         </div>
-                        {currentDay.truckCheck && (
-                          <Badge variant="outline" className="bg-white dark:bg-slate-800">
-                            <CheckCircle2 className="h-3 w-3 mr-1 text-emerald-600" />
-                            Check OK
-                          </Badge>
-                        )}
                       </div>
-                    </div>
+                    )}
+                    
+                    {/* Status de conformidade - só mostrar quando ativo */}
+                    {!currentDay.isPaused && (
+                      <div className={`p-3 rounded-lg ${
+                        conformity.status === 'danger' ? 'bg-red-100 dark:bg-red-900/30' :
+                        conformity.status === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' :
+                        'bg-emerald-100 dark:bg-emerald-900/30'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {conformity.status === 'danger' && <AlertTriangle className="h-5 w-5 text-red-600" />}
+                            {conformity.status === 'warning' && <AlertTriangle className="h-5 w-5 text-amber-600" />}
+                            {conformity.status === 'ok' && <CheckCircle2 className="h-5 w-5 text-emerald-600" />}
+                            <span className={`text-sm font-medium ${
+                              conformity.status === 'danger' ? 'text-red-700 dark:text-red-300' :
+                              conformity.status === 'warning' ? 'text-amber-700 dark:text-amber-300' :
+                              'text-emerald-700 dark:text-emerald-300'
+                            }`}>
+                              {conformity.message || 'Dentro dos limites'}
+                            </span>
+                          </div>
+                          {currentDay.truckCheck && (
+                            <Badge variant="outline" className="bg-white dark:bg-slate-800">
+                              <CheckCircle2 className="h-3 w-3 mr-1 text-emerald-600" />
+                              Check OK
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
+
+                {/* Botões de Ação - Pausar/Retomar */}
+                {currentDay.isPaused ? (
+                  <div className="space-y-3">
+                    <Button 
+                      onClick={openResumeDialog}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 h-14 text-lg"
+                    >
+                      <PlayCircle className="h-5 w-5 mr-2" />
+                      RETOMAR CONDUÇÃO
+                    </Button>
+                    <Button 
+                      onClick={() => setShowEndForm(true)}
+                      variant="outline"
+                      className="w-full h-12 text-red-600 border-red-300 hover:bg-red-50"
+                    >
+                      <Square className="h-5 w-5 mr-2" />
+                      FINALIZAR DIA
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <Button 
+                      onClick={openPauseDialog}
+                      className="w-full bg-amber-600 hover:bg-amber-700 h-14 text-lg"
+                    >
+                      <Pause className="h-5 w-5 mr-2" />
+                      PAUSAR CONDUÇÃO
+                    </Button>
+                    <Button 
+                      onClick={() => setShowEndForm(true)}
+                      variant="outline"
+                      className="w-full h-12 text-red-600 border-red-300 hover:bg-red-50"
+                    >
+                      <Square className="h-5 w-5 mr-2" />
+                      FINALIZAR DIA
+                    </Button>
+                  </div>
+                )}
 
                 {/* Adicionar Evento Rápido */}
                 <Card>
@@ -1856,6 +2085,146 @@ export default function DiarioMotorista() {
               <Button onClick={handleDeleteDay} variant="destructive">
                 <Trash2 className="h-4 w-4 mr-2" />
                 Excluir
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Diálogo: Pausar Condução */}
+      {showPauseDialog && (
+        <Dialog open={showPauseDialog} onOpenChange={() => setShowPauseDialog(false)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-amber-600">
+                <Pause className="h-5 w-5" />
+                Pausar Condução
+              </DialogTitle>
+              <DialogDescription>
+                O colega vai assumir o volante. Registre o KM atual do painel.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4">
+              <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  🚚 Olhe o painel do caminhão e anote o KM atual.
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>KM atual no painel</Label>
+                <Input 
+                  type="number"
+                  placeholder="Ex: 100280"
+                  value={pauseKm}
+                  onChange={(e) => setPauseKm(e.target.value)}
+                  className="text-lg"
+                />
+              </div>
+              
+              {pauseKm && currentDay?.drivingSessions && (() => {
+                const activeSession = currentDay.drivingSessions.find(s => s.status === 'active');
+                if (activeSession?.startKm) {
+                  const kmDriven = parseInt(pauseKm) - activeSession.startKm;
+                  if (kmDriven >= 0) {
+                    return (
+                      <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-center">
+                        <p className="text-sm text-muted-foreground">KM rodados neste turno:</p>
+                        <p className="text-2xl font-bold text-emerald-600">{kmDriven} km</p>
+                      </div>
+                    );
+                  }
+                }
+                return null;
+              })()}
+            </div>
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowPauseDialog(false)}>
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handlePauseDriving} 
+                className="bg-amber-600 hover:bg-amber-700"
+                disabled={processingAction || !pauseKm}
+              >
+                {processingAction ? (
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Pause className="h-4 w-4 mr-2" />
+                )}
+                Confirmar Pausa
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Diálogo: Retomar Condução */}
+      {showResumeDialog && (
+        <Dialog open={showResumeDialog} onOpenChange={() => setShowResumeDialog(false)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-emerald-600">
+                <PlayCircle className="h-5 w-5" />
+                Retomar Condução
+              </DialogTitle>
+              <DialogDescription>
+                Você vai assumir o volante. Registre o KM atual do painel.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4">
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
+                <p className="text-sm text-emerald-700 dark:text-emerald-300">
+                  🚚 Olhe o painel do caminhão e anote o KM atual.
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>KM atual no painel</Label>
+                <Input 
+                  type="number"
+                  placeholder="Ex: 100565"
+                  value={resumeKm}
+                  onChange={(e) => setResumeKm(e.target.value)}
+                  className="text-lg"
+                />
+              </div>
+              
+              {currentDay?.drivingSessions && currentDay.drivingSessions.length > 0 && (() => {
+                const lastSession = currentDay.drivingSessions[currentDay.drivingSessions.length - 1];
+                if (lastSession?.endKm && resumeKm) {
+                  const colleagueKm = parseInt(resumeKm) - lastSession.endKm;
+                  if (colleagueKm >= 0) {
+                    return (
+                      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center">
+                        <p className="text-sm text-muted-foreground">Colega rodou (não registrado):</p>
+                        <p className="text-xl font-bold text-blue-600">{colleagueKm} km</p>
+                      </div>
+                    );
+                  }
+                }
+                return null;
+              })()}
+            </div>
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowResumeDialog(false)}>
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleResumeDriving} 
+                className="bg-emerald-600 hover:bg-emerald-700"
+                disabled={processingAction || !resumeKm}
+              >
+                {processingAction ? (
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <PlayCircle className="h-4 w-4 mr-2" />
+                )}
+                Retomar Condução
               </Button>
             </DialogFooter>
           </DialogContent>

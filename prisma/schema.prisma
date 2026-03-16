@@ -26,14 +26,35 @@ model WorkDay {
   truckCheck    Boolean   @default(false)
   observations  String?
   matricula     String?   // Matrícula do caminhão (formato europeu: AA-00-BB)
+  isPaused      Boolean   @default(false)  // Se a condução está pausada
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  // Relacionamento com eventos
-  events        Event[]
+  // Relacionamentos
+  events          Event[]
+  drivingSessions DrivingSession[]
 
   @@index([matricula]) // Índice para busca por matrícula
   @@map("work_days")
+}
+
+// Turnos de condução (para motoristas em dupla)
+model DrivingSession {
+  id        String   @id @default(cuid())
+  workDayId String
+  startTime String   // Horário de início do turno
+  endTime   String?  // Horário de fim do turno (null se em andamento)
+  startKm   Int?     // KM no início do turno
+  endKm     Int?     // KM no fim do turno
+  status    String   @default("active") // active, paused, finished
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamento
+  workDay WorkDay @relation(fields: [workDayId], references: [id], onDelete: Cascade)
+
+  @@index([workDayId])
+  @@map("driving_sessions")
 }
 
 // Eventos do dia (pausas, abastecimento, fronteiras, etc.)
@@ -46,7 +67,7 @@ model Event {
   updatedAt   DateTime @updatedAt
 
   // Relacionamento
-  workDay     WorkDay  @relation(fields: [workDayId], references: [id], onDelete: Cascade)
+  workDay WorkDay @relation(fields: [workDayId], references: [id], onDelete: Cascade)
 
   @@map("events")
 }

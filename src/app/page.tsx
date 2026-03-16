@@ -22,11 +22,9 @@ import {
   Truck, Play, Square, Plus, Clock, MapPin, Gauge, 
   AlertTriangle, CheckCircle2, Calendar, FileText, ChevronRight,
   Sun, Moon, Activity, X, AlertCircle, RefreshCw, LogOut, User,
-  Eye, Pencil, Trash2, Save, Download, BarChart3, History, Car,
-  Navigation, Wifi, WifiOff, CloudOff
+  Eye, Pencil, Trash2, Save, Download, BarChart3, History, Car
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useGeolocation } from '@/hooks/use-geolocation';
 
 // Tipos
 interface Event {
@@ -156,11 +154,6 @@ export default function DiarioMotorista() {
   const [reportType, setReportType] = useState<'weekly' | 'monthly'>('weekly');
   const [loadingVehicles, setLoadingVehicles] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
-  
-  // Estado de conexão e geolocalização
-  const [isOnline, setIsOnline] = useState(true);
-  const [pendingSync, setPendingSync] = useState<number>(0);
-  const { country: gpsCountry, loading: loadingGps, error: gpsError, getLocation } = useGeolocation();
   
   const [endForm, setEndForm] = useState({
     endCountry: '',
@@ -695,32 +688,6 @@ export default function DiarioMotorista() {
     }
   };
 
-  // Monitorar status de conexão
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    
-    // Verificar status inicial
-    setIsOnline(navigator.onLine);
-    
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // Preencher país automaticamente quando GPS detectar
-  useEffect(() => {
-    if (gpsCountry && !startForm.startCountry && !loadingGps) {
-      setStartForm(prev => ({ ...prev, startCountry: gpsCountry }));
-      showToast(`País detectado: ${gpsCountry}`, 'success');
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gpsCountry, loadingGps]);
-
   // Carregar estatísticas quando mudar para view de relatórios
   useEffect(() => {
     if (activeView === 'reports') {
@@ -795,25 +762,6 @@ export default function DiarioMotorista() {
             </div>
             
             <div className="flex items-center gap-2">
-              {/* Status Online/Offline */}
-              <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs ${
-                isOnline 
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' 
-                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-              }`}>
-                {isOnline ? (
-                  <>
-                    <Wifi className="h-3 w-3" />
-                    <span className="hidden sm:inline">Online</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="h-3 w-3" />
-                    <span className="hidden sm:inline">Offline</span>
-                  </>
-                )}
-              </div>
-              
               <Button 
                 variant="ghost" 
                 size="sm"
@@ -919,30 +867,11 @@ export default function DiarioMotorista() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">País de Início</Label>
-                          <div className="flex gap-1">
-                            <Input 
-                              placeholder="Ex: Portugal"
-                              value={startForm.startCountry}
-                              onChange={(e) => setStartForm({...startForm, startCountry: e.target.value})}
-                              className="flex-1"
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              onClick={() => getLocation()}
-                              disabled={loadingGps}
-                              title="Detectar país via GPS"
-                              className="shrink-0"
-                            >
-                              {loadingGps ? (
-                                <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
-                              ) : (
-                                <Navigation className="h-4 w-4 text-blue-600" />
-                              )}
-                            </Button>
-                          </div>
-                          {gpsError && <p className="text-xs text-red-500">{gpsError}</p>}
+                          <Input 
+                            placeholder="Ex: Portugal"
+                            value={startForm.startCountry}
+                            onChange={(e) => setStartForm({...startForm, startCountry: e.target.value})}
+                          />
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">
@@ -1137,29 +1066,11 @@ export default function DiarioMotorista() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <Label className="text-xs">País de Fim</Label>
-                          <div className="flex gap-1">
-                            <Input 
-                              placeholder="Ex: Espanha"
-                              value={endForm.endCountry}
-                              onChange={(e) => setEndForm({...endForm, endCountry: e.target.value})}
-                              className="flex-1"
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              onClick={() => getLocation()}
-                              disabled={loadingGps}
-                              title="Detectar país via GPS"
-                              className="shrink-0"
-                            >
-                              {loadingGps ? (
-                                <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
-                              ) : (
-                                <Navigation className="h-4 w-4 text-blue-600" />
-                              )}
-                            </Button>
-                          </div>
+                          <Input 
+                            placeholder="Ex: Espanha"
+                            value={endForm.endCountry}
+                            onChange={(e) => setEndForm({...endForm, endCountry: e.target.value})}
+                          />
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">KM Final {currentDay.startKm ? `(mín: ${currentDay.startKm})` : ''}</Label>

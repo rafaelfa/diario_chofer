@@ -5,7 +5,7 @@ import { jwtVerify } from 'jose';
 const SECRET_KEY = process.env.JWT_SECRET || 'sua-chave-secreta-muito-segura-mude-no-vercel';
 
 // Rotas que não precisam de autenticação
-const publicRoutes = ['/login', '/api/auth/login', '/api/auth/register', '/api/auth/me', '/downloads', '/api/download'];
+const publicRoutes = ['/login', '/api/auth/login', '/api/auth/register', '/api/auth/me'];
 
 // Rotas de arquivos estáticos
 const staticRoutes = ['/_next', '/favicon.ico', '/icon-', '/logo', '/manifest', '/robots'];

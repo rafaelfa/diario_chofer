@@ -72,7 +72,6 @@ export async function PUT(
     if (body.amplitude !== undefined) dataToUpdate.amplitude = body.amplitude || null;
     if (body.truckCheck !== undefined) dataToUpdate.truckCheck = Boolean(body.truckCheck);
     if (body.observations !== undefined) dataToUpdate.observations = body.observations || null;
-    if (body.matricula !== undefined) dataToUpdate.matricula = body.matricula ? body.matricula.toUpperCase() : null;
 
     console.log('Dados a atualizar:', JSON.stringify(dataToUpdate, null, 2));
 

@@ -74,38 +74,8 @@ export async function POST(request: NextRequest) {
       startCountry, 
       startKm, 
       lastRest, 
-      truckCheck,
-      matricula 
+      truckCheck 
     } = body;
-
-    // Validar formato da matrícula (formato europeu: AA-00-BB ou AA-00-00)
-    if (matricula) {
-      const matriculaRegex = /^[A-Z]{2}-\d{2}-[A-Z0-9]{2}$/;
-      if (!matriculaRegex.test(matricula.toUpperCase())) {
-        return NextResponse.json({ 
-          error: 'Formato de matrícula inválido. Use o formato AA-00-BB (ex: PT-12-AB)' 
-        }, { status: 400 });
-      }
-    }
-
-    // Se tiver matrícula e KM inicial, validar contra último registro
-    if (matricula && startKm) {
-      const kmValue = parseInt(String(startKm), 10);
-      const lastRecord = await db.workDay.findFirst({
-        where: { 
-          matricula: matricula.toUpperCase(),
-          endTime: { not: null } // Apenas registros finalizados
-        },
-        orderBy: { date: 'desc' },
-        select: { endKm: true, date: true }
-      });
-
-      if (lastRecord && lastRecord.endKm && kmValue < lastRecord.endKm) {
-        return NextResponse.json({ 
-          error: `KM inicial (${kmValue}) não pode ser menor que o KM final do último registro deste caminhão (${lastRecord.endKm})` 
-        }, { status: 400 });
-      }
-    }
 
     // Converter a data para o início do dia (UTC)
     const workDate = new Date(date);
@@ -122,7 +92,6 @@ export async function POST(request: NextRequest) {
       startKm: kmValue,
       lastRest: lastRest || null,
       truckCheck: Boolean(truckCheck),
-      matricula: matricula ? matricula.toUpperCase() : null,
     };
     
     console.log('=== DADOS A SALVAR ===');

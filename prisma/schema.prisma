@@ -25,14 +25,12 @@ model WorkDay {
   amplitude     String?
   truckCheck    Boolean   @default(false)
   observations  String?
-  matricula     String?   // Matrícula do caminhão (formato europeu: AA-00-BB)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   // Relacionamento com eventos
   events        Event[]
 
-  @@index([matricula]) // Índice para busca por matrícula
   @@map("work_days")
 }
 

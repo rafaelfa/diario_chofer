@@ -47,7 +47,6 @@ interface WorkDay {
   amplitude: string | null;
   truckCheck: boolean;
   observations: string | null;
-  matricula: string | null;
   events: Event[];
   kmTraveled: number | null;
   hoursWorked: number | null;
@@ -106,17 +105,8 @@ export default function DiarioMotorista() {
     startCountry: '',
     startKm: '',
     lastRest: '',
-    truckCheck: false,
-    matricula: ''
+    truckCheck: false
   });
-  
-  // Estado para info do último KM da matrícula
-  const [lastKmInfo, setLastKmInfo] = useState<{
-    found: boolean;
-    lastKm: number | null;
-    message?: string;
-  } | null>(null);
-  const [checkingMatricula, setCheckingMatricula] = useState(false);
   
   const [endForm, setEndForm] = useState({
     endCountry: '',
@@ -140,8 +130,7 @@ export default function DiarioMotorista() {
     endCountry: '',
     startKm: '',
     endKm: '',
-    observations: '',
-    matricula: ''
+    observations: ''
   });
   const [deleteConfirm, setDeleteConfirm] = useState<WorkDay | null>(null);
 
@@ -196,29 +185,6 @@ export default function DiarioMotorista() {
   useEffect(() => {
     loadData();
   }, [loadData, router]);
-
-  // Buscar último KM da matrícula quando ela é digitada
-  const checkLastKm = async (matricula: string) => {
-    // Validar formato da matrícula
-    const matriculaRegex = /^[A-Z]{2}-\d{2}-[A-Z0-9]{2}$/;
-    if (!matriculaRegex.test(matricula.toUpperCase())) {
-      setLastKmInfo(null);
-      return;
-    }
-
-    setCheckingMatricula(true);
-    try {
-      const res = await fetch(`/api/matricula/lastkm?matricula=${encodeURIComponent(matricula)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setLastKmInfo(data);
-      }
-    } catch (error) {
-      console.error('Erro ao buscar último KM:', error);
-    } finally {
-      setCheckingMatricula(false);
-    }
-  };
 
   // Logout
   const handleLogout = async () => {
@@ -322,23 +288,13 @@ export default function DiarioMotorista() {
   
   const proceedWithStartDay = async (date: string, now: Date) => {
     try {
-      // Validar formato da matrícula se preenchida
-      if (startForm.matricula) {
-        const matriculaRegex = /^[A-Z]{2}-\d{2}-[A-Z0-9]{2}$/;
-        if (!matriculaRegex.test(startForm.matricula.toUpperCase())) {
-          showToast('Formato de matrícula inválido. Use AA-00-BB (ex: PT-12-AB)', 'error');
-          return;
-        }
-      }
-
       const payload = {
         date: date,
         startTime: now.toTimeString().slice(0, 5),
         startCountry: startForm.startCountry || null,
         startKm: startForm.startKm ? parseInt(startForm.startKm) : null,
         lastRest: startForm.lastRest || null,
-        truckCheck: startForm.truckCheck,
-        matricula: startForm.matricula ? startForm.matricula.toUpperCase() : null
+        truckCheck: startForm.truckCheck
       };
       
       console.log('Enviando dados:', payload);
@@ -352,8 +308,7 @@ export default function DiarioMotorista() {
       if (res.ok) {
         const newDay = await res.json();
         setCurrentDay(newDay);
-        setStartForm({ startCountry: '', startKm: '', lastRest: '', truckCheck: false, matricula: '' });
-        setLastKmInfo(null);
+        setStartForm({ startCountry: '', startKm: '', lastRest: '', truckCheck: false });
         loadData();
         showToast('Dia iniciado com sucesso!', 'success');
       } else {
@@ -488,8 +443,7 @@ export default function DiarioMotorista() {
       endCountry: day.endCountry || '',
       startKm: day.startKm?.toString() || '',
       endKm: day.endKm?.toString() || '',
-      observations: day.observations || '',
-      matricula: day.matricula || ''
+      observations: day.observations || ''
     });
   };
 
@@ -509,8 +463,7 @@ export default function DiarioMotorista() {
           endCountry: editForm.endCountry || null,
           startKm: editForm.startKm ? parseInt(editForm.startKm) : null,
           endKm: editForm.endKm ? parseInt(editForm.endKm) : null,
-          observations: editForm.observations || null,
-          matricula: editForm.matricula ? editForm.matricula.toUpperCase() : null
+          observations: editForm.observations || null
         })
       });
 
@@ -723,41 +676,6 @@ export default function DiarioMotorista() {
                     <Separator className="my-4" />
                     
                     <div className="space-y-3 text-left max-w-sm mx-auto">
-                      {/* Matrícula do Caminhão */}
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Matrícula do Caminhão</Label>
-                        <Input 
-                          placeholder="Ex: PT-12-AB"
-                          value={startForm.matricula}
-                          onChange={(e) => {
-                            const value = e.target.value.toUpperCase();
-                            setStartForm({...startForm, matricula: value});
-                            // Buscar último KM quando a matrícula estiver completa
-                            if (value.length === 8) {
-                              checkLastKm(value);
-                            } else {
-                              setLastKmInfo(null);
-                            }
-                          }}
-                          maxLength={8}
-                          className="uppercase"
-                        />
-                        {checkingMatricula && (
-                          <p className="text-xs text-muted-foreground">Verificando último registro...</p>
-                        )}
-                        {lastKmInfo && lastKmInfo.found && (
-                          <p className="text-xs text-emerald-600 font-medium">
-                            Último KM: {lastKmInfo.lastKm?.toLocaleString()}
-                          </p>
-                        )}
-                        {lastKmInfo && !lastKmInfo.found && (
-                          <p className="text-xs text-muted-foreground">
-                            Nenhum registro anterior para esta matrícula
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground">Formato: AA-00-BB</p>
-                      </div>
-                      
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">País de Início</Label>
@@ -768,9 +686,7 @@ export default function DiarioMotorista() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">
-                            KM Inicial {lastKmInfo?.found && <span className="text-emerald-600">(mín: {lastKmInfo.lastKm?.toLocaleString()})</span>}
-                          </Label>
+                          <Label className="text-xs text-muted-foreground">KM Inicial</Label>
                           <Input 
                             type="number"
                             placeholder="Ex: 125000"
@@ -827,15 +743,6 @@ export default function DiarioMotorista() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    {/* Matrícula do Caminhão */}
-                    {currentDay.matricula && (
-                      <div className="mb-3 text-center">
-                        <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800">
-                          <Truck className="h-3 w-3 mr-1" />
-                          Matrícula: {currentDay.matricula}
-                        </Badge>
-                      </div>
-                    )}
                     <div className="grid grid-cols-3 gap-4 mb-4">
                       <div className="text-center p-2 bg-white/50 dark:bg-slate-800/50 rounded-lg">
                         <Clock className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
@@ -1149,15 +1056,6 @@ export default function DiarioMotorista() {
                             </Badge>
                           </div>
                         )}
-                        
-                        {day.matricula && (
-                          <div className="mt-2">
-                            <Badge variant="outline" className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800">
-                              <Truck className="h-3 w-3 mr-1" />
-                              {day.matricula}
-                            </Badge>
-                          </div>
-                        )}
                       </CardContent>
                     </Card>
                   ))}
@@ -1335,13 +1233,6 @@ export default function DiarioMotorista() {
                   Check do caminhão realizado
                 </Badge>
               )}
-              
-              {viewingDay.matricula && (
-                <Badge variant="outline" className="w-full justify-center py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800">
-                  <Truck className="h-4 w-4 mr-2" />
-                  Matrícula: {viewingDay.matricula}
-                </Badge>
-              )}
             </div>
             
             <DialogFooter>
@@ -1441,18 +1332,6 @@ export default function DiarioMotorista() {
                   value={editForm.endKm}
                   onChange={(e) => setEditForm({...editForm, endKm: e.target.value})}
                 />
-              </div>
-              
-              <div className="space-y-1">
-                <Label className="text-xs">Matrícula do Caminhão</Label>
-                <Input 
-                  placeholder="Ex: PT-12-AB"
-                  value={editForm.matricula}
-                  onChange={(e) => setEditForm({...editForm, matricula: e.target.value.toUpperCase()})}
-                  maxLength={8}
-                  className="uppercase"
-                />
-                <p className="text-xs text-muted-foreground">Formato: AA-00-BB</p>
               </div>
               
               <div className="space-y-1">

@@ -23,6 +23,7 @@ import {
   AlertTriangle, CheckCircle2, Calendar, FileText, ChevronRight,
   Sun, Moon, Activity, X, AlertCircle, RefreshCw, LogOut, User,
   Eye, Pencil, Trash2, Save, Download, BarChart3, History, Car,
+  Menu, Home, ClipboardList, PieChart,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -183,6 +184,7 @@ export default function DiarioMotorista() {
     matricula: ''
   });
   const [deleteConfirm, setDeleteConfirm] = useState<WorkDay | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Mostrar toast
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning') => {
@@ -749,48 +751,53 @@ export default function DiarioMotorista() {
 
       {/* Header */}
       <header className="sticky top-0 z-40 border-b bg-white/90 backdrop-blur-sm dark:bg-slate-900/90">
-        <div className="container mx-auto px-4 py-3">
+        <div className="container mx-auto px-4 py-2">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="bg-emerald-600 p-2 rounded-xl">
-                <Truck className="h-6 w-6 text-white" />
+            {/* Logo e Título */}
+            <div className="flex items-center gap-2">
+              <div className="bg-emerald-600 p-1.5 rounded-lg">
+                <Truck className="h-5 w-5 text-white" />
               </div>
               <div>
-                <h1 className="text-lg font-bold text-slate-900 dark:text-white">Diário do Motorista</h1>
-                <p className="text-xs text-slate-500">
+                <h1 className="text-base font-bold text-slate-900 dark:text-white">Diário do Motorista</h1>
+                <p className="text-xs text-slate-500 hidden sm:block">
                   {new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </p>
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            {/* Menu Desktop */}
+            <div className="hidden md:flex items-center gap-1">
               <Button 
                 variant="ghost" 
                 size="sm"
                 onClick={() => setActiveView('main')}
-                className={activeView === 'main' ? 'bg-slate-200 dark:bg-slate-700' : ''}
+                className={activeView === 'main' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : ''}
               >
+                <Home className="h-4 w-4 mr-1" />
                 Hoje
               </Button>
               <Button 
                 variant="ghost" 
                 size="sm"
                 onClick={() => setActiveView('history')}
-                className={activeView === 'history' ? 'bg-slate-200 dark:bg-slate-700' : ''}
+                className={activeView === 'history' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : ''}
               >
+                <ClipboardList className="h-4 w-4 mr-1" />
                 Histórico
               </Button>
               <Button 
                 variant="ghost" 
                 size="sm"
                 onClick={() => setActiveView('reports')}
-                className={activeView === 'reports' ? 'bg-slate-200 dark:bg-slate-700' : ''}
+                className={activeView === 'reports' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : ''}
               >
+                <PieChart className="h-4 w-4 mr-1" />
                 Relatórios
               </Button>
               
-              {/* Usuário e Logout */}
-              <div className="hidden sm:flex items-center gap-2 ml-2 pl-2 border-l">
+              {/* Usuário e Logout - Desktop */}
+              <div className="flex items-center gap-2 ml-2 pl-2 border-l">
                 <div className="flex items-center gap-1 text-sm text-muted-foreground">
                   <User className="h-4 w-4" />
                   <span>{currentUser?.username}</span>
@@ -804,6 +811,73 @@ export default function DiarioMotorista() {
                   <LogOut className="h-4 w-4" />
                 </Button>
               </div>
+            </div>
+
+            {/* Menu Mobile - Botão Hamburger */}
+            <div className="md:hidden relative">
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="p-2"
+              >
+                <Menu className="h-6 w-6" />
+              </Button>
+              
+              {/* Dropdown Menu Mobile */}
+              {mobileMenuOpen && (
+                <div className="absolute right-0 top-full mt-1 w-56 bg-white dark:bg-slate-800 rounded-lg shadow-lg border z-50">
+                  <div className="p-2">
+                    {/* Info do Usuário */}
+                    <div className="px-3 py-2 border-b mb-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">{currentUser?.username}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Opções de Navegação */}
+                    <button
+                      onClick={() => { setActiveView('main'); setMobileMenuOpen(false); }}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm ${
+                        activeView === 'main' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : 'hover:bg-slate-100 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <Home className="h-4 w-4" />
+                      Hoje
+                    </button>
+                    <button
+                      onClick={() => { setActiveView('history'); setMobileMenuOpen(false); }}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm ${
+                        activeView === 'history' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : 'hover:bg-slate-100 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <ClipboardList className="h-4 w-4" />
+                      Histórico
+                    </button>
+                    <button
+                      onClick={() => { setActiveView('reports'); setMobileMenuOpen(false); }}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm ${
+                        activeView === 'reports' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : 'hover:bg-slate-100 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <PieChart className="h-4 w-4" />
+                      Relatórios
+                    </button>
+                    
+                    {/* Logout */}
+                    <div className="border-t mt-2 pt-2">
+                      <button
+                        onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Terminar Sessão
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -41,21 +41,8 @@ export default function OfflinePage() {
             Sem Conexão
           </h1>
           <p style={{ color: '#64748b', marginBottom: '16px' }}>
-            Você está offline no momento. Algumas funcionalidades podem não estar disponíveis.
+            Você está offline no momento.
           </p>
-          <div style={{
-            background: '#ecfdf5',
-            padding: '16px',
-            borderRadius: '8px',
-            marginBottom: '16px'
-          }}>
-            <p style={{ fontWeight: '500', color: '#059669', marginBottom: '8px' }}>
-              Dados salvos localmente
-            </p>
-            <p style={{ color: '#64748b', fontSize: '14px' }}>
-              Suas alterações serão sincronizadas automaticamente quando a conexão for restaurada.
-            </p>
-          </div>
           <a 
             href="/"
             style={{

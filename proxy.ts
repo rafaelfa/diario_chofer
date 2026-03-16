@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 const SECRET_KEY = process.env.JWT_SECRET || 'sua-chave-secreta-muito-segura-mude-no-vercel';
 
-const publicRoutes = ['/login', '/api/auth/login', '/api/auth/register', '/api/auth/me', '/offline'];
+const publicRoutes = ['/login', '/api/auth/login', '/api/auth/register', '/api/auth/me', '/downloads', '/api/download', '/offline'];
 const staticRoutes = ['/_next', '/favicon.ico', '/icon-', '/logo', '/manifest', '/robots', '/sw.js'];
 
 export async function proxy(request: NextRequest) {

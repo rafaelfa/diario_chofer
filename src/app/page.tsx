@@ -22,7 +22,7 @@ import {
   Truck, Play, Square, Plus, Clock, MapPin, Gauge, 
   AlertTriangle, CheckCircle2, Calendar, FileText, ChevronRight,
   Sun, Moon, Activity, X, AlertCircle, RefreshCw, LogOut, User,
-  Eye, Pencil, Trash2, Save, Download, BarChart3, History, Car
+  Eye, Pencil, Trash2, Save
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -65,35 +65,6 @@ interface Report {
     avgKmPerDay: number;
   };
   alerts: string[];
-}
-
-interface VehicleStats {
-  matricula: string;
-  viagens: number;
-  diasTrabalhados: number;
-  totalKm: number;
-  totalHoras: number;
-  mediaKmPorDia: number;
-  mediaHorasPorDia: number;
-  totalEventos: number;
-  kmInicial: number | null;
-  kmFinal: number | null;
-  primeiroRegistro: string;
-  ultimoRegistro: string;
-  paises: string[];
-  checksRealizados: number;
-}
-
-interface VehicleHistory {
-  id: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  startKm: number | null;
-  endKm: number | null;
-  kmTraveled: number | null;
-  startCountry: string | null;
-  endCountry: string | null;
 }
 
 // Componente de Toast simples
@@ -146,14 +117,6 @@ export default function DiarioMotorista() {
     message?: string;
   } | null>(null);
   const [checkingMatricula, setCheckingMatricula] = useState(false);
-  
-  // Estados para relatórios de veículos
-  const [vehicleStats, setVehicleStats] = useState<VehicleStats[]>([]);
-  const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
-  const [vehicleHistory, setVehicleHistory] = useState<VehicleHistory[]>([]);
-  const [reportType, setReportType] = useState<'weekly' | 'monthly'>('weekly');
-  const [loadingVehicles, setLoadingVehicles] = useState(false);
-  const [loadingPdf, setLoadingPdf] = useState(false);
   
   const [endForm, setEndForm] = useState({
     endCountry: '',
@@ -626,75 +589,6 @@ export default function DiarioMotorista() {
     }
     return { status: 'ok', message: `${hoursWorked.toFixed(1)}h de condução - OK` };
   };
-
-  // ==================== FUNÇÕES DE VEÍCULOS ====================
-
-  // Carregar estatísticas de veículos
-  const loadVehicleStats = async () => {
-    setLoadingVehicles(true);
-    try {
-      const res = await fetch('/api/veiculos/estatisticas');
-      if (res.ok) {
-        const data = await res.json();
-        setVehicleStats(data.veiculos);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar estatísticas:', error);
-    } finally {
-      setLoadingVehicles(false);
-    }
-  };
-
-  // Carregar histórico de um veículo específico
-  const loadVehicleHistory = async (matricula: string) => {
-    setLoadingVehicles(true);
-    try {
-      const res = await fetch(`/api/veiculos/historico?matricula=${encodeURIComponent(matricula)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setVehicleHistory(data.historico);
-        setSelectedVehicle(matricula);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar histórico:', error);
-    } finally {
-      setLoadingVehicles(false);
-    }
-  };
-
-  // Gerar PDF
-  const generatePdf = async (type: 'weekly' | 'monthly', matricula?: string) => {
-    setLoadingPdf(true);
-    try {
-      const params = new URLSearchParams({ type });
-      if (matricula) params.append('matricula', matricula);
-      
-      const res = await fetch(`/api/reports/pdf?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        
-        // Abrir HTML em nova janela para impressão
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-          printWindow.document.write(data.html);
-          printWindow.document.close();
-          printWindow.print();
-        }
-      }
-    } catch (error) {
-      showToast('Erro ao gerar relatório', 'error');
-    } finally {
-      setLoadingPdf(false);
-    }
-  };
-
-  // Carregar estatísticas quando mudar para view de relatórios
-  useEffect(() => {
-    if (activeView === 'reports') {
-      loadVehicleStats();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView]);
 
   const conformity = getConformityStatus();
 
@@ -1276,184 +1170,14 @@ export default function DiarioMotorista() {
         {/* VIEW: RELATÓRIOS */}
         {activeView === 'reports' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Relatórios</h2>
-              <div className="flex gap-2">
-                <Button 
-                  variant={reportType === 'weekly' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setReportType('weekly')}
-                  className={reportType === 'weekly' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                >
-                  Semanal
-                </Button>
-                <Button 
-                  variant={reportType === 'monthly' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setReportType('monthly')}
-                  className={reportType === 'monthly' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                >
-                  Mensal
-                </Button>
-              </div>
-            </div>
-
-            {/* Gerar PDF */}
-            <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20">
-              <CardContent className="pt-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-5 w-5 text-blue-600" />
-                    <div>
-                      <p className="font-medium">Gerar Relatório {reportType === 'weekly' ? 'Semanal' : 'Mensal'}</p>
-                      <p className="text-xs text-muted-foreground">Abrirá em nova janela para impressão/PDF</p>
-                    </div>
-                  </div>
-                  <Button 
-                    onClick={() => generatePdf(reportType)}
-                    disabled={loadingPdf}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    {loadingPdf ? (
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Download className="h-4 w-4 mr-2" />
-                    )}
-                    Gerar PDF
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Estatísticas por Veículo */}
+            <h2 className="text-lg font-semibold">Relatórios</h2>
+            
+            {/* Relatório Semanal */}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Car className="h-4 w-4" />
-                  Estatísticas por Veículo
-                </CardTitle>
-                <CardDescription>
-                  Clique em um veículo para ver o histórico detalhado
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {loadingVehicles ? (
-                  <div className="text-center py-4">
-                    <RefreshCw className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                  </div>
-                ) : vehicleStats.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-4">
-                    Nenhum veículo registado ainda
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {vehicleStats.map((v) => (
-                      <div 
-                        key={v.matricula}
-                        className={`p-3 border rounded-lg cursor-pointer transition-all ${
-                          selectedVehicle === v.matricula 
-                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' 
-                            : 'hover:border-slate-300 dark:hover:border-slate-600'
-                        }`}
-                        onClick={() => loadVehicleHistory(v.matricula)}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <Truck className="h-4 w-4 text-blue-600" />
-                            <span className="font-semibold">{v.matricula}</span>
-                          </div>
-                          <Badge variant="outline">{v.viagens} viagens</Badge>
-                        </div>
-                        <div className="grid grid-cols-4 gap-2 text-center text-sm">
-                          <div>
-                            <p className="font-bold">{v.totalKm.toLocaleString()}</p>
-                            <p className="text-xs text-muted-foreground">km</p>
-                          </div>
-                          <div>
-                            <p className="font-bold">{v.totalHoras}h</p>
-                            <p className="text-xs text-muted-foreground">horas</p>
-                          </div>
-                          <div>
-                            <p className="font-bold">{v.mediaKmPorDia}</p>
-                            <p className="text-xs text-muted-foreground">km/dia</p>
-                          </div>
-                          <div>
-                            <p className="font-bold">{v.kmFinal?.toLocaleString() || '-'}</p>
-                            <p className="text-xs text-muted-foreground">KM atual</p>
-                          </div>
-                        </div>
-                        {v.paises.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {v.paises.map((pais, i) => (
-                              <Badge key={i} variant="secondary" className="text-xs">{pais}</Badge>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Histórico do Veículo Selecionado */}
-            {selectedVehicle && vehicleHistory.length > 0 && (
-              <Card>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <History className="h-4 w-4" />
-                      Histórico: {selectedVehicle}
-                    </CardTitle>
-                    <div className="flex gap-2">
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => generatePdf(reportType, selectedVehicle)}
-                        disabled={loadingPdf}
-                      >
-                        <Download className="h-3 w-3 mr-1" />
-                        PDF
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="ghost"
-                        onClick={() => { setSelectedVehicle(null); setVehicleHistory([]); }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-64">
-                    <div className="space-y-2">
-                      {vehicleHistory.map((h) => (
-                        <div key={h.id} className="p-2 bg-slate-50 dark:bg-slate-800 rounded text-sm">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-medium">{new Date(h.date).toLocaleDateString('pt-PT', { weekday: 'short', day: '2-digit', month: '2-digit' })}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {h.startTime} - {h.endTime || 'em curso'}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-xs">
-                            <span>{h.startCountry || '--'} → {h.endCountry || '--'}</span>
-                            <span className="font-semibold">{h.kmTraveled || '--'} km</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Resumo Semanal/Mensal */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" />
-                  Resumo {reportType === 'weekly' ? 'Semanal' : 'Mensal'}
+                  <FileText className="h-4 w-4" />
+                  Esta Semana
                 </CardTitle>
               </CardHeader>
               <CardContent>

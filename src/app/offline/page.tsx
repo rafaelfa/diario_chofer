@@ -1,40 +1,80 @@
-'use client';
-
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { WifiOff, RefreshCw } from 'lucide-react';
-
 export default function OfflinePage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex items-center justify-center p-4">
-      <Card className="max-w-md w-full">
-        <CardHeader className="text-center">
-          <div className="mx-auto bg-amber-100 dark:bg-amber-900/30 w-16 h-16 rounded-full flex items-center justify-center mb-4">
-            <WifiOff className="h-8 w-8 text-amber-600" />
+    <html lang="pt-BR">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Sem Conexão - Diário do Motorista</title>
+      </head>
+      <body style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(to bottom, #f8fafc, #f1f5f9)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '16px',
+        margin: 0,
+        fontFamily: 'system-ui, sans-serif'
+      }}>
+        <div style={{
+          maxWidth: '400px',
+          width: '100%',
+          background: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+          padding: '24px',
+          textAlign: 'center'
+        }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            background: '#fef3c7',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 16px'
+          }}>
+            <span style={{ fontSize: '32px' }}>📡</span>
           </div>
-          <CardTitle className="text-xl">Sem Conexão</CardTitle>
-        </CardHeader>
-        <CardContent className="text-center space-y-4">
-          <p className="text-muted-foreground">
+          <h1 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '16px' }}>
+            Sem Conexão
+          </h1>
+          <p style={{ color: '#64748b', marginBottom: '16px' }}>
             Você está offline no momento. Algumas funcionalidades podem não estar disponíveis.
           </p>
-          <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg text-sm">
-            <p className="font-medium text-emerald-700 dark:text-emerald-300 mb-2">
-              ✅ Dados salvos localmente
+          <div style={{
+            background: '#ecfdf5',
+            padding: '16px',
+            borderRadius: '8px',
+            marginBottom: '16px'
+          }}>
+            <p style={{ fontWeight: '500', color: '#059669', marginBottom: '8px' }}>
+              Dados salvos localmente
             </p>
-            <p className="text-muted-foreground">
+            <p style={{ color: '#64748b', fontSize: '14px' }}>
               Suas alterações serão sincronizadas automaticamente quando a conexão for restaurada.
             </p>
           </div>
-          <Button 
-            onClick={() => window.location.reload()}
-            className="w-full bg-emerald-600 hover:bg-emerald-700"
+          <a 
+            href="/"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              background: '#059669',
+              color: 'white',
+              padding: '12px 24px',
+              borderRadius: '8px',
+              textDecoration: 'none',
+              fontWeight: '500'
+            }}
           >
-            <RefreshCw className="h-4 w-4 mr-2" />
             Tentar Novamente
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
+          </a>
+        </div>
+      </body>
+    </html>
   );
 }

@@ -7,13 +7,25 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const type = searchParams.get('type') || 'weekly';
     const matricula = searchParams.get('matricula');
+    const customStartDate = searchParams.get('startDate');
+    const customEndDate = searchParams.get('endDate');
     const referenceDate = searchParams.get('date') ? new Date(searchParams.get('date')!) : new Date();
 
     let startDate: Date;
     let endDate: Date;
     let periodLabel: string;
 
-    if (type === 'weekly') {
+    // Se datas personalizadas foram fornecidas
+    if (customStartDate && customEndDate) {
+      startDate = new Date(customStartDate);
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(customEndDate);
+      endDate.setHours(23, 59, 59, 999);
+      
+      const startFormatted = startDate.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' });
+      const endFormatted = endDate.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      periodLabel = `Período: ${startFormatted} a ${endFormatted}`;
+    } else if (type === 'weekly') {
       const dayOfWeek = referenceDate.getDay();
       const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       startDate = new Date(referenceDate);

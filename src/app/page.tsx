@@ -23,10 +23,10 @@ import {
   AlertTriangle, CheckCircle2, Calendar, FileText, ChevronRight,
   Sun, Moon, Activity, X, AlertCircle, RefreshCw, LogOut, User,
   Eye, Pencil, Trash2, Save, Download, BarChart3, History, Car,
-  Menu, Home, ClipboardList, PieChart, Pause, PlayCircle, Route,
+  Navigation, Wifi, WifiOff, CloudOff, Pause, FastForward
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-
+import { useGeolocation } from '@/hooks/use-geolocation';
 
 // Tipos
 interface Event {
@@ -62,10 +62,12 @@ interface WorkDay {
   matricula: string | null;
   isPaused: boolean;
   events: Event[];
-  drivingSessions: DrivingSession[];
+  drivingSessions?: DrivingSession[];
   kmTraveled: number | null;
   hoursWorked: number | null;
   totalEvents: number;
+  lastSessionKm?: number | null;
+  sessionCount?: number;
 }
 
 interface Report {
@@ -169,6 +171,10 @@ export default function DiarioMotorista() {
   const [loadingVehicles, setLoadingVehicles] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
   
+  // Estado de conexão e geolocalização
+  const [isOnline, setIsOnline] = useState(true);
+  const [pendingSync, setPendingSync] = useState<number>(0);
+  const { country: gpsCountry, loading: loadingGps, error: gpsError, getLocation } = useGeolocation();
   
   const [endForm, setEndForm] = useState({
     endCountry: '',
@@ -196,14 +202,11 @@ export default function DiarioMotorista() {
     matricula: ''
   });
   const [deleteConfirm, setDeleteConfirm] = useState<WorkDay | null>(null);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
+  
   // Estados para pausar/retomar condução
   const [showPauseDialog, setShowPauseDialog] = useState(false);
-  const [showResumeDialog, setShowResumeDialog] = useState(false);
   const [pauseKm, setPauseKm] = useState('');
-  const [resumeKm, setResumeKm] = useState('');
-  const [processingAction, setProcessingAction] = useState(false);
+  const [isProcessingPause, setIsProcessingPause] = useState(false);
 
   // Mostrar toast
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning') => {
@@ -288,131 +291,6 @@ export default function DiarioMotorista() {
     } catch {
       showToast('Erro ao sair', 'error');
     }
-  };
-
-  // ==================== PAUSAR / RETOMAR CONDUÇÃO ====================
-
-  // Calcular totais das sessões
-  const calculateSessionsTotals = (sessions: DrivingSession[]) => {
-    let totalKm = 0;
-    let totalMinutes = 0;
-
-    for (const session of sessions) {
-      if (session.startKm && session.endKm) {
-        totalKm += session.endKm - session.startKm;
-      }
-      if (session.startTime && session.endTime) {
-        const [startH, startM] = session.startTime.split(':').map(Number);
-        const [endH, endM] = session.endTime.split(':').map(Number);
-        const startMin = startH * 60 + startM;
-        const endMin = endH * 60 + endM;
-        totalMinutes += endMin > startMin ? endMin - startMin : (24 * 60 - startMin) + endMin;
-      }
-    }
-
-    return { totalKm, totalMinutes };
-  };
-
-  // Calcular tempo da sessão ativa
-  const calculateActiveSessionTime = () => {
-    if (!currentDay?.drivingSessions) return 0;
-    
-    const activeSession = currentDay.drivingSessions.find(s => s.status === 'active');
-    if (!activeSession) return 0;
-
-    const [startH, startM] = activeSession.startTime.split(':').map(Number);
-    const startMinutes = startH * 60 + startM;
-    const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    
-    return nowMinutes >= startMinutes ? nowMinutes - startMinutes : (24 * 60 - startMinutes) + nowMinutes;
-  };
-
-  // Pausar condução
-  const handlePauseDriving = async () => {
-    if (!currentDay || !pauseKm) {
-      showToast('Informe o KM atual', 'warning');
-      return;
-    }
-
-    setProcessingAction(true);
-    try {
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workDayId: currentDay.id,
-          action: 'pause',
-          km: pauseKm
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setShowPauseDialog(false);
-        setPauseKm('');
-        loadData();
-        showToast(data.message || 'Condução pausada', 'success');
-      } else {
-        const error = await res.json();
-        showToast(error.error || 'Erro ao pausar', 'error');
-      }
-    } catch (error) {
-      showToast('Erro de conexão', 'error');
-    } finally {
-      setProcessingAction(false);
-    }
-  };
-
-  // Retomar condução
-  const handleResumeDriving = async () => {
-    if (!currentDay || !resumeKm) {
-      showToast('Informe o KM atual', 'warning');
-      return;
-    }
-
-    setProcessingAction(true);
-    try {
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workDayId: currentDay.id,
-          action: 'resume',
-          km: resumeKm
-        })
-      });
-
-      if (res.ok) {
-        setShowResumeDialog(false);
-        setResumeKm('');
-        loadData();
-        showToast('Condução retomada!', 'success');
-      } else {
-        const error = await res.json();
-        showToast(error.error || 'Erro ao retomar', 'error');
-      }
-    } catch (error) {
-      showToast('Erro de conexão', 'error');
-    } finally {
-      setProcessingAction(false);
-    }
-  };
-
-  // Abrir diálogo de pausa
-  const openPauseDialog = () => {
-    // Sugerir KM baseado no último KM conhecido
-    const lastSession = currentDay?.drivingSessions?.find(s => s.status === 'active');
-    if (lastSession?.startKm) {
-      setPauseKm(''); // Deixar em branco para o usuário preencher
-    }
-    setShowPauseDialog(true);
-  };
-
-  // Abrir diálogo de retomada
-  const openResumeDialog = () => {
-    setResumeKm('');
-    setShowResumeDialog(true);
   };
 
   // ==================== AÇÕES PRINCIPAIS ====================
@@ -655,6 +533,109 @@ export default function DiarioMotorista() {
     }
   };
 
+  // ==================== PAUSAR / RETOMAR CONDUÇÃO ====================
+  
+  // Abrir diálogo de pausa
+  const handleOpenPauseDialog = () => {
+    if (!currentDay) return;
+    // Pré-preencher com o último KM conhecido
+    const lastKm = currentDay.lastSessionKm || currentDay.startKm || 0;
+    setPauseKm(lastKm ? lastKm.toString() : '');
+    setShowPauseDialog(true);
+  };
+
+  // Pausar condução (outro motorista assume)
+  const handlePauseDriving = async () => {
+    if (!currentDay) return;
+    
+    const kmValue = pauseKm ? parseInt(pauseKm) : null;
+    
+    if (!kmValue) {
+      showToast('Por favor, informe o KM atual', 'warning');
+      return;
+    }
+    
+    setIsProcessingPause(true);
+    try {
+      const res = await fetch('/api/driving-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workDayId: currentDay.id,
+          action: 'pause',
+          currentKm: kmValue
+        })
+      });
+
+      if (res.ok) {
+        const updatedDay = await res.json();
+        setCurrentDay(updatedDay);
+        setShowPauseDialog(false);
+        setPauseKm('');
+        loadData();
+        showToast('Condução pausada - outro motorista pode assumir', 'success');
+      } else {
+        const error = await res.json();
+        showToast(error.error || 'Erro ao pausar condução', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    } finally {
+      setIsProcessingPause(false);
+    }
+  };
+
+  // Retomar condução
+  const handleResumeDriving = async () => {
+    if (!currentDay) return;
+    
+    // Pré-preencher com o último KM da sessão anterior
+    const lastKm = currentDay.lastSessionKm || currentDay.startKm || 0;
+    setPauseKm(lastKm ? lastKm.toString() : '');
+    setShowPauseDialog(true);
+  };
+
+  // Confirmar retomada com KM atual
+  const handleConfirmResume = async () => {
+    if (!currentDay) return;
+    
+    const kmValue = pauseKm ? parseInt(pauseKm) : null;
+    
+    if (!kmValue) {
+      showToast('Por favor, informe o KM atual do veículo', 'warning');
+      return;
+    }
+    
+    setIsProcessingPause(true);
+    try {
+      const res = await fetch('/api/driving-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workDayId: currentDay.id,
+          action: 'resume',
+          currentKm: kmValue
+        })
+      });
+
+      if (res.ok) {
+        const updatedDay = await res.json();
+        setCurrentDay(updatedDay);
+        setShowPauseDialog(false);
+        setPauseKm('');
+        loadData();
+        showToast('Condução retomada!', 'success');
+      } else {
+        const error = await res.json();
+        showToast(error.error || 'Erro ao retomar condução', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    } finally {
+      setIsProcessingPause(false);
+    }
+  };
+
   // ==================== FUNÇÕES DE GERENCIAMENTO ====================
 
   // Visualizar registro
@@ -836,6 +817,32 @@ export default function DiarioMotorista() {
     }
   };
 
+  // Monitorar status de conexão
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    // Verificar status inicial
+    setIsOnline(navigator.onLine);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Preencher país automaticamente quando GPS detectar
+  useEffect(() => {
+    if (gpsCountry && !startForm.startCountry && !loadingGps) {
+      setStartForm(prev => ({ ...prev, startCountry: gpsCountry }));
+      showToast(`País detectado: ${gpsCountry}`, 'success');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gpsCountry, loadingGps]);
+
   // Carregar estatísticas quando mudar para view de relatórios
   useEffect(() => {
     if (activeView === 'reports') {
@@ -895,53 +902,67 @@ export default function DiarioMotorista() {
 
       {/* Header */}
       <header className="sticky top-0 z-40 border-b bg-white/90 backdrop-blur-sm dark:bg-slate-900/90">
-        <div className="container mx-auto px-4 py-2">
+        <div className="container mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
-            {/* Logo e Título */}
-            <div className="flex items-center gap-2">
-              <div className="bg-emerald-600 p-1.5 rounded-lg">
-                <Truck className="h-5 w-5 text-white" />
+            <div className="flex items-center gap-3">
+              <div className="bg-emerald-600 p-2 rounded-xl">
+                <Truck className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-base font-bold text-slate-900 dark:text-white">Diário do Motorista</h1>
-                <p className="text-xs text-slate-500 hidden sm:block">
+                <h1 className="text-lg font-bold text-slate-900 dark:text-white">Diário do Motorista</h1>
+                <p className="text-xs text-slate-500">
                   {new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </p>
               </div>
             </div>
             
-            {/* Menu Desktop */}
-            <div className="hidden md:flex items-center gap-1">
+            <div className="flex items-center gap-2">
+              {/* Status Online/Offline */}
+              <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs ${
+                isOnline 
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' 
+                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+              }`}>
+                {isOnline ? (
+                  <>
+                    <Wifi className="h-3 w-3" />
+                    <span className="hidden sm:inline">Online</span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="h-3 w-3" />
+                    <span className="hidden sm:inline">Offline</span>
+                  </>
+                )}
+              </div>
+              
               <Button 
                 variant="ghost" 
                 size="sm"
                 onClick={() => setActiveView('main')}
-                className={activeView === 'main' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : ''}
+                className={activeView === 'main' ? 'bg-slate-200 dark:bg-slate-700' : ''}
               >
-                <Home className="h-4 w-4 mr-1" />
                 Hoje
               </Button>
               <Button 
                 variant="ghost" 
                 size="sm"
                 onClick={() => setActiveView('history')}
-                className={activeView === 'history' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : ''}
+                className={activeView === 'history' ? 'bg-slate-200 dark:bg-slate-700' : ''}
               >
-                <ClipboardList className="h-4 w-4 mr-1" />
                 Histórico
               </Button>
               <Button 
                 variant="ghost" 
                 size="sm"
                 onClick={() => setActiveView('reports')}
-                className={activeView === 'reports' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : ''}
+                className={activeView === 'reports' ? 'bg-slate-200 dark:bg-slate-700' : ''}
               >
-                <PieChart className="h-4 w-4 mr-1" />
                 Relatórios
               </Button>
               
-              {/* Usuário e Logout - Desktop */}
-              <div className="flex items-center gap-2 ml-2 pl-2 border-l">
+              {/* Usuário e Logout */}
+              <div className="hidden sm:flex items-center gap-2 ml-2 pl-2 border-l">
                 <div className="flex items-center gap-1 text-sm text-muted-foreground">
                   <User className="h-4 w-4" />
                   <span>{currentUser?.username}</span>
@@ -955,73 +976,6 @@ export default function DiarioMotorista() {
                   <LogOut className="h-4 w-4" />
                 </Button>
               </div>
-            </div>
-
-            {/* Menu Mobile - Botão Hamburger */}
-            <div className="md:hidden relative">
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="p-2"
-              >
-                <Menu className="h-6 w-6" />
-              </Button>
-              
-              {/* Dropdown Menu Mobile */}
-              {mobileMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 w-56 bg-white dark:bg-slate-800 rounded-lg shadow-lg border z-50">
-                  <div className="p-2">
-                    {/* Info do Usuário */}
-                    <div className="px-3 py-2 border-b mb-2">
-                      <div className="flex items-center gap-2 text-sm">
-                        <User className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-medium">{currentUser?.username}</span>
-                      </div>
-                    </div>
-                    
-                    {/* Opções de Navegação */}
-                    <button
-                      onClick={() => { setActiveView('main'); setMobileMenuOpen(false); }}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm ${
-                        activeView === 'main' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : 'hover:bg-slate-100 dark:hover:bg-slate-700'
-                      }`}
-                    >
-                      <Home className="h-4 w-4" />
-                      Hoje
-                    </button>
-                    <button
-                      onClick={() => { setActiveView('history'); setMobileMenuOpen(false); }}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm ${
-                        activeView === 'history' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : 'hover:bg-slate-100 dark:hover:bg-slate-700'
-                      }`}
-                    >
-                      <ClipboardList className="h-4 w-4" />
-                      Histórico
-                    </button>
-                    <button
-                      onClick={() => { setActiveView('reports'); setMobileMenuOpen(false); }}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm ${
-                        activeView === 'reports' ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300' : 'hover:bg-slate-100 dark:hover:bg-slate-700'
-                      }`}
-                    >
-                      <PieChart className="h-4 w-4" />
-                      Relatórios
-                    </button>
-                    
-                    {/* Logout */}
-                    <div className="border-t mt-2 pt-2">
-                      <button
-                        onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
-                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                      >
-                        <LogOut className="h-4 w-4" />
-                        Terminar Sessão
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -1087,11 +1041,30 @@ export default function DiarioMotorista() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">País de Início</Label>
-                          <Input 
-                            placeholder="Ex: Portugal"
-                            value={startForm.startCountry}
-                            onChange={(e) => setStartForm({...startForm, startCountry: e.target.value})}
-                          />
+                          <div className="flex gap-1">
+                            <Input 
+                              placeholder="Ex: Portugal"
+                              value={startForm.startCountry}
+                              onChange={(e) => setStartForm({...startForm, startCountry: e.target.value})}
+                              className="flex-1"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              onClick={() => getLocation()}
+                              disabled={loadingGps}
+                              title="Detectar país via GPS"
+                              className="shrink-0"
+                            >
+                              {loadingGps ? (
+                                <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
+                              ) : (
+                                <Navigation className="h-4 w-4 text-blue-600" />
+                              )}
+                            </Button>
+                          </div>
+                          {gpsError && <p className="text-xs text-red-500">{gpsError}</p>}
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">
@@ -1136,37 +1109,19 @@ export default function DiarioMotorista() {
               /* DIA EM ANDAMENTO */
               <div className="space-y-4">
                 {/* Card Principal do Dia */}
-                <Card className={`${currentDay.isPaused ? 'border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950 dark:to-slate-900' : 'border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950 dark:to-slate-900'}`}>
+                <Card className="border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950 dark:to-slate-900">
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
                       <div>
-                        <Badge className={`${currentDay.isPaused ? 'bg-amber-600' : 'bg-emerald-600'} mb-2`}>
-                          {currentDay.isPaused ? (
-                            <>
-                              <Pause className="h-3 w-3 mr-1" />
-                              CONDUÇÃO PAUSADA
-                            </>
-                          ) : (
-                            <>
-                              <Activity className="h-3 w-3 mr-1 animate-pulse" />
-                              CONDUZINDO
-                            </>
-                          )}
+                        <Badge className="bg-emerald-600 mb-2">
+                          <Activity className="h-3 w-3 mr-1 animate-pulse" />
+                          DIA EM ANDAMENTO
                         </Badge>
                         <CardTitle>{formatDate(currentDay.date)}</CardTitle>
                       </div>
                       <div className="text-right">
-                        {currentDay.isPaused ? (
-                          <>
-                            <p className="text-lg font-bold font-mono text-amber-600">PAUSADO</p>
-                            <p className="text-xs text-muted-foreground">colega no volante</p>
-                          </>
-                        ) : (
-                          <>
-                            <p className="text-2xl font-bold font-mono">{calculateWorkingTime()}</p>
-                            <p className="text-xs text-muted-foreground">tempo deste turno</p>
-                          </>
-                        )}
+                        <p className="text-2xl font-bold font-mono">{calculateWorkingTime()}</p>
+                        <p className="text-xs text-muted-foreground">tempo de trabalho</p>
                       </div>
                     </div>
                   </CardHeader>
@@ -1180,119 +1135,91 @@ export default function DiarioMotorista() {
                         </Badge>
                       </div>
                     )}
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                      <div className="text-center p-2 bg-white/50 dark:bg-slate-800/50 rounded-lg">
+                        <Clock className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+                        <p className="text-sm font-semibold">{formatTime(currentDay.startTime)}</p>
+                        <p className="text-xs text-muted-foreground">Início</p>
+                      </div>
+                      <div className="text-center p-2 bg-white/50 dark:bg-slate-800/50 rounded-lg">
+                        <MapPin className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+                        <p className="text-sm font-semibold">{currentDay.startCountry || '--'}</p>
+                        <p className="text-xs text-muted-foreground">Local</p>
+                      </div>
+                      <div className="text-center p-2 bg-white/50 dark:bg-slate-800/50 rounded-lg">
+                        <Gauge className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+                        <p className="text-sm font-semibold">{currentDay.startKm?.toLocaleString() || '--'}</p>
+                        <p className="text-xs text-muted-foreground">KM</p>
+                      </div>
+                    </div>
                     
-                    {/* Resumo dos Turnos */}
-                    {currentDay.drivingSessions && currentDay.drivingSessions.length > 0 && (
-                      <div className="mb-4 p-3 bg-white/50 dark:bg-slate-800/50 rounded-lg">
-                        <p className="text-xs font-medium text-muted-foreground mb-2">📊 Seus Turnos Hoje:</p>
-                        <div className="space-y-1">
-                          {currentDay.drivingSessions.map((session, idx) => {
-                            const sessionKm = session.startKm && session.endKm ? session.endKm - session.startKm : null;
-                            const sessionTime = session.startTime && session.endTime ? 
-                              (() => {
-                                const [startH, startM] = session.startTime.split(':').map(Number);
-                                const [endH, endM] = session.endTime.split(':').map(Number);
-                                const mins = (endH * 60 + endM) - (startH * 60 + startM);
-                                const h = Math.floor(Math.abs(mins) / 60);
-                                const m = Math.abs(mins) % 60;
-                                return `${h}h${m.toString().padStart(2, '0')}`;
-                              })() : null;
-                            
-                            return (
-                              <div key={session.id} className="flex items-center justify-between text-sm">
-                                <span className="text-muted-foreground">
-                                  {idx + 1}º Turno: {session.startTime} → {session.endTime || 'agora'}
-                                </span>
-                                <span className="font-medium">
-                                  {sessionTime || '--:--'} | {sessionKm ? `${sessionKm}km` : '--km'}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div className="mt-2 pt-2 border-t flex justify-between text-sm font-semibold">
-                          <span>Total:</span>
-                          <span>
-                            {(() => {
-                              const totals = calculateSessionsTotals(currentDay.drivingSessions);
-                              const h = Math.floor(totals.totalMinutes / 60);
-                              const m = totals.totalMinutes % 60;
-                              return `${h}h${m.toString().padStart(2, '0')} | ${totals.totalKm}km`;
-                            })()}
+                    {/* Status de conformidade */}
+                    <div className={`p-3 rounded-lg ${
+                      conformity.status === 'danger' ? 'bg-red-100 dark:bg-red-900/30' :
+                      conformity.status === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' :
+                      'bg-emerald-100 dark:bg-emerald-900/30'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {conformity.status === 'danger' && <AlertTriangle className="h-5 w-5 text-red-600" />}
+                          {conformity.status === 'warning' && <AlertTriangle className="h-5 w-5 text-amber-600" />}
+                          {conformity.status === 'ok' && <CheckCircle2 className="h-5 w-5 text-emerald-600" />}
+                          <span className={`text-sm font-medium ${
+                            conformity.status === 'danger' ? 'text-red-700 dark:text-red-300' :
+                            conformity.status === 'warning' ? 'text-amber-700 dark:text-amber-300' :
+                            'text-emerald-700 dark:text-emerald-300'
+                          }`}>
+                            {conformity.message || 'Dentro dos limites'}
                           </span>
                         </div>
+                        {currentDay.truckCheck && (
+                          <Badge variant="outline" className="bg-white dark:bg-slate-800">
+                            <CheckCircle2 className="h-3 w-3 mr-1 text-emerald-600" />
+                            Check OK
+                          </Badge>
+                        )}
                       </div>
-                    )}
-                    
-                    {/* Status de conformidade - só mostrar quando ativo */}
-                    {!currentDay.isPaused && (
-                      <div className={`p-3 rounded-lg ${
-                        conformity.status === 'danger' ? 'bg-red-100 dark:bg-red-900/30' :
-                        conformity.status === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' :
-                        'bg-emerald-100 dark:bg-emerald-900/30'
-                      }`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {conformity.status === 'danger' && <AlertTriangle className="h-5 w-5 text-red-600" />}
-                            {conformity.status === 'warning' && <AlertTriangle className="h-5 w-5 text-amber-600" />}
-                            {conformity.status === 'ok' && <CheckCircle2 className="h-5 w-5 text-emerald-600" />}
-                            <span className={`text-sm font-medium ${
-                              conformity.status === 'danger' ? 'text-red-700 dark:text-red-300' :
-                              conformity.status === 'warning' ? 'text-amber-700 dark:text-amber-300' :
-                              'text-emerald-700 dark:text-emerald-300'
-                            }`}>
-                              {conformity.message || 'Dentro dos limites'}
-                            </span>
-                          </div>
-                          {currentDay.truckCheck && (
-                            <Badge variant="outline" className="bg-white dark:bg-slate-800">
-                              <CheckCircle2 className="h-3 w-3 mr-1 text-emerald-600" />
-                              Check OK
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    )}
+                    </div>
                   </CardContent>
                 </Card>
 
-                {/* Botões de Ação - Pausar/Retomar */}
+                {/* Botões de Pausar/Retomar Condução (para dupla de motoristas) */}
                 {currentDay.isPaused ? (
-                  <div className="space-y-3">
-                    <Button 
-                      onClick={openResumeDialog}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 h-14 text-lg"
-                    >
-                      <PlayCircle className="h-5 w-5 mr-2" />
-                      RETOMAR CONDUÇÃO
-                    </Button>
-                    <Button 
-                      onClick={() => setShowEndForm(true)}
-                      variant="outline"
-                      className="w-full h-12 text-red-600 border-red-300 hover:bg-red-50"
-                    >
-                      <Square className="h-5 w-5 mr-2" />
-                      FINALIZAR DIA
-                    </Button>
-                  </div>
+                  <Card className="border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950">
+                    <CardContent className="pt-4">
+                      <div className="text-center space-y-3">
+                        <div className="flex items-center justify-center gap-2 text-amber-600">
+                          <Pause className="h-5 w-5" />
+                          <span className="font-medium">Condução Pausada</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Outro motorista está dirigindo
+                        </p>
+                        {currentDay.lastSessionKm && (
+                          <p className="text-sm">
+                            <span className="text-muted-foreground">Último KM registrado:</span>{' '}
+                            <span className="font-semibold">{currentDay.lastSessionKm.toLocaleString()}</span>
+                          </p>
+                        )}
+                        <Button 
+                          onClick={handleResumeDriving}
+                          className="w-full bg-emerald-600 hover:bg-emerald-700"
+                        >
+                          <FastForward className="h-4 w-4 mr-2" />
+                          RETOMAR CONDUÇÃO
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ) : (
-                  <div className="space-y-3">
-                    <Button 
-                      onClick={openPauseDialog}
-                      className="w-full bg-amber-600 hover:bg-amber-700 h-14 text-lg"
-                    >
-                      <Pause className="h-5 w-5 mr-2" />
-                      PAUSAR CONDUÇÃO
-                    </Button>
-                    <Button 
-                      onClick={() => setShowEndForm(true)}
-                      variant="outline"
-                      className="w-full h-12 text-red-600 border-red-300 hover:bg-red-50"
-                    >
-                      <Square className="h-5 w-5 mr-2" />
-                      FINALIZAR DIA
-                    </Button>
-                  </div>
+                  <Button 
+                    onClick={handleOpenPauseDialog}
+                    variant="outline"
+                    className="w-full h-12 border-amber-300 text-amber-700 hover:bg-amber-50"
+                  >
+                    <Pause className="h-4 w-4 mr-2" />
+                    PAUSAR CONDUÇÃO (outro motorista assume)
+                  </Button>
                 )}
 
                 {/* Adicionar Evento Rápido */}
@@ -1371,14 +1298,32 @@ export default function DiarioMotorista() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <Label className="text-xs">País de Fim</Label>
-                          <Input 
-                            placeholder="Ex: Espanha"
-                            value={endForm.endCountry}
-                            onChange={(e) => setEndForm({...endForm, endCountry: e.target.value})}
-                          />
+                          <div className="flex gap-1">
+                            <Input 
+                              placeholder="Ex: Espanha"
+                              value={endForm.endCountry}
+                              onChange={(e) => setEndForm({...endForm, endCountry: e.target.value})}
+                              className="flex-1"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              onClick={() => getLocation()}
+                              disabled={loadingGps}
+                              title="Detectar país via GPS"
+                              className="shrink-0"
+                            >
+                              {loadingGps ? (
+                                <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
+                              ) : (
+                                <Navigation className="h-4 w-4 text-blue-600" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs">KM Final {currentDay.startKm ? `(mín: ${currentDay.startKm})` : ''}</Label>
+                          <Label className="text-xs">KM Final {currentDay.lastSessionKm ? `(último: ${currentDay.lastSessionKm.toLocaleString()})` : currentDay.startKm ? `(mín: ${currentDay.startKm})` : ''}</Label>
                           <Input 
                             type="number"
                             placeholder="Ex: 125500"
@@ -1539,7 +1484,7 @@ export default function DiarioMotorista() {
                             <p className="text-xs text-muted-foreground">tempo</p>
                           </div>
                           <div className="bg-slate-50 dark:bg-slate-800 p-2 rounded">
-                            <p className="font-semibold">{day.kmTraveled || '--'}</p>
+                            <p className="font-semibold">{day.kmTraveled ? day.kmTraveled.toLocaleString() : '--'}</p>
                             <p className="text-xs text-muted-foreground">km</p>
                           </div>
                           <div className="bg-slate-50 dark:bg-slate-800 p-2 rounded">
@@ -1551,6 +1496,26 @@ export default function DiarioMotorista() {
                             <p className="text-xs text-muted-foreground">para {day.endCountry || '--'}</p>
                           </div>
                         </div>
+                        
+                        {/* Indicador de sessões múltiplas */}
+                        {day.sessionCount && day.sessionCount > 1 && (
+                          <div className="mt-2">
+                            <Badge variant="outline" className="text-xs bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800">
+                              <Activity className="h-3 w-3 mr-1" />
+                              {day.sessionCount} turnos de condução
+                            </Badge>
+                          </div>
+                        )}
+                        
+                        {/* Status pausado */}
+                        {day.isPaused && !day.endTime && (
+                          <div className="mt-2">
+                            <Badge variant="outline" className="text-xs bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800">
+                              <Pause className="h-3 w-3 mr-1" />
+                              Condução pausada
+                            </Badge>
+                          </div>
+                        )}
                         
                         {day.truckCheck && (
                           <div className="mt-2">
@@ -2091,140 +2056,62 @@ export default function DiarioMotorista() {
         </Dialog>
       )}
 
-      {/* Diálogo: Pausar Condução */}
-      {showPauseDialog && (
+      {/* Diálogo: Pausar/Retomar Condução */}
+      {showPauseDialog && currentDay && (
         <Dialog open={showPauseDialog} onOpenChange={() => setShowPauseDialog(false)}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-amber-600">
-                <Pause className="h-5 w-5" />
-                Pausar Condução
+                {currentDay.isPaused ? <FastForward className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
+                {currentDay.isPaused ? 'Retomar Condução' : 'Pausar Condução'}
               </DialogTitle>
               <DialogDescription>
-                O colega vai assumir o volante. Registre o KM atual do painel.
+                {currentDay.isPaused 
+                  ? 'Informe o KM atual do veículo para retomar sua condução.'
+                  : 'Informe o KM atual para registrar o fim do seu turno. O outro motorista pode assumir.'}
               </DialogDescription>
             </DialogHeader>
             
             <div className="space-y-4">
-              <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
-                <p className="text-sm text-amber-700 dark:text-amber-300">
-                  🚚 Olhe o painel do caminhão e anote o KM atual.
-                </p>
-              </div>
+              {/* Mostrar último KM conhecido */}
+              {(currentDay.lastSessionKm || currentDay.startKm) && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Último KM registrado:</p>
+                  <p className="text-xl font-bold text-emerald-600">
+                    {(currentDay.lastSessionKm || currentDay.startKm)?.toLocaleString()}
+                  </p>
+                </div>
+              )}
               
-              <div className="space-y-2">
-                <Label>KM atual no painel</Label>
+              <div className="space-y-1">
+                <Label className="text-xs">KM Atual do Veículo</Label>
                 <Input 
                   type="number"
-                  placeholder="Ex: 100280"
+                  placeholder="Ex: 125500"
                   value={pauseKm}
                   onChange={(e) => setPauseKm(e.target.value)}
                   className="text-lg"
                 />
               </div>
-              
-              {pauseKm && currentDay?.drivingSessions && (() => {
-                const activeSession = currentDay.drivingSessions.find(s => s.status === 'active');
-                if (activeSession?.startKm) {
-                  const kmDriven = parseInt(pauseKm) - activeSession.startKm;
-                  if (kmDriven >= 0) {
-                    return (
-                      <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-center">
-                        <p className="text-sm text-muted-foreground">KM rodados neste turno:</p>
-                        <p className="text-2xl font-bold text-emerald-600">{kmDriven} km</p>
-                      </div>
-                    );
-                  }
-                }
-                return null;
-              })()}
             </div>
             
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowPauseDialog(false)}>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setShowPauseDialog(false)} className="w-full sm:w-auto">
                 Cancelar
               </Button>
               <Button 
-                onClick={handlePauseDriving} 
-                className="bg-amber-600 hover:bg-amber-700"
-                disabled={processingAction || !pauseKm}
+                onClick={currentDay.isPaused ? handleConfirmResume : handlePauseDriving}
+                disabled={isProcessingPause}
+                className={`w-full sm:w-auto ${currentDay.isPaused ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}
               >
-                {processingAction ? (
+                {isProcessingPause ? (
                   <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                ) : currentDay.isPaused ? (
+                  <FastForward className="h-4 w-4 mr-2" />
                 ) : (
                   <Pause className="h-4 w-4 mr-2" />
                 )}
-                Confirmar Pausa
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* Diálogo: Retomar Condução */}
-      {showResumeDialog && (
-        <Dialog open={showResumeDialog} onOpenChange={() => setShowResumeDialog(false)}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-emerald-600">
-                <PlayCircle className="h-5 w-5" />
-                Retomar Condução
-              </DialogTitle>
-              <DialogDescription>
-                Você vai assumir o volante. Registre o KM atual do painel.
-              </DialogDescription>
-            </DialogHeader>
-            
-            <div className="space-y-4">
-              <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
-                <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                  🚚 Olhe o painel do caminhão e anote o KM atual.
-                </p>
-              </div>
-              
-              <div className="space-y-2">
-                <Label>KM atual no painel</Label>
-                <Input 
-                  type="number"
-                  placeholder="Ex: 100565"
-                  value={resumeKm}
-                  onChange={(e) => setResumeKm(e.target.value)}
-                  className="text-lg"
-                />
-              </div>
-              
-              {currentDay?.drivingSessions && currentDay.drivingSessions.length > 0 && (() => {
-                const lastSession = currentDay.drivingSessions[currentDay.drivingSessions.length - 1];
-                if (lastSession?.endKm && resumeKm) {
-                  const colleagueKm = parseInt(resumeKm) - lastSession.endKm;
-                  if (colleagueKm >= 0) {
-                    return (
-                      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center">
-                        <p className="text-sm text-muted-foreground">Colega rodou (não registrado):</p>
-                        <p className="text-xl font-bold text-blue-600">{colleagueKm} km</p>
-                      </div>
-                    );
-                  }
-                }
-                return null;
-              })()}
-            </div>
-            
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowResumeDialog(false)}>
-                Cancelar
-              </Button>
-              <Button 
-                onClick={handleResumeDriving} 
-                className="bg-emerald-600 hover:bg-emerald-700"
-                disabled={processingAction || !resumeKm}
-              >
-                {processingAction ? (
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <PlayCircle className="h-4 w-4 mr-2" />
-                )}
-                Retomar Condução
+                {currentDay.isPaused ? 'Retomar' : 'Pausar'}
               </Button>
             </DialogFooter>
           </DialogContent>

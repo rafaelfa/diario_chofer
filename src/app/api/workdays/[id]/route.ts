@@ -14,6 +14,9 @@ export async function GET(
       include: {
         events: {
           orderBy: { time: 'asc' }
+        },
+        drivingSessions: {
+          orderBy: { startTime: 'asc' }
         }
       }
     });
@@ -39,7 +42,11 @@ export async function GET(
       ...workDay,
       kmTraveled,
       hoursWorked: hoursWorked ? parseFloat(hoursWorked.toFixed(2)) : null,
-      totalEvents: workDay.events.length
+      totalEvents: workDay.events.length,
+      // Último KM registrado (útil para pausar/retomar)
+      lastSessionKm: workDay.drivingSessions?.length > 0 
+        ? (workDay.drivingSessions[workDay.drivingSessions.length - 1].endKm || workDay.drivingSessions[workDay.drivingSessions.length - 1].startKm)
+        : workDay.startKm
     });
   } catch (error) {
     console.error('Error fetching work day:', error);
@@ -80,7 +87,10 @@ export async function PUT(
       where: { id },
       data: dataToUpdate,
       include: {
-        events: true
+        events: true,
+        drivingSessions: {
+          orderBy: { startTime: 'asc' }
+        }
       }
     });
 

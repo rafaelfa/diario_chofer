@@ -25,11 +25,43 @@ export async function GET(
       return NextResponse.json({ error: 'Dia não encontrado' }, { status: 404 });
     }
 
-    // Adicionar campos calculados
-    const kmTraveled = workDay.endKm && workDay.startKm ? workDay.endKm - workDay.startKm : null;
+    // Calcular KM total das sessões de condução
+    let kmFromSessions = 0;
+    if (workDay.drivingSessions && workDay.drivingSessions.length > 0) {
+      kmFromSessions = workDay.drivingSessions.reduce((total, session) => {
+        if (session.startKm && session.endKm) {
+          return total + (session.endKm - session.startKm);
+        }
+        return total;
+      }, 0);
+    }
+    
+    // KM traveled: preferir cálculo por sessões, senão usar o método antigo
+    const kmTraveled = kmFromSessions > 0 
+      ? kmFromSessions 
+      : (workDay.endKm && workDay.startKm ? workDay.endKm - workDay.startKm : null);
 
+    // Calcular horas trabalhadas baseado nas sessões
     let hoursWorked: number | null = null;
-    if (workDay.startTime && workDay.endTime) {
+    if (workDay.drivingSessions && workDay.drivingSessions.length > 0) {
+      // Somar horas de cada sessão
+      let totalMinutes = 0;
+      for (const session of workDay.drivingSessions) {
+        if (session.startTime && session.endTime) {
+          const [startH, startM] = session.startTime.split(':').map(Number);
+          const [endH, endM] = session.endTime.split(':').map(Number);
+          const startMinutes = startH * 60 + startM;
+          const endMinutes = endH * 60 + endM;
+          let diff = endMinutes - startMinutes;
+          if (diff < 0) diff += 24 * 60; // Passou da meia-noite
+          totalMinutes += diff;
+        }
+      }
+      hoursWorked = totalMinutes > 0 ? totalMinutes / 60 : null;
+    }
+    
+    // Fallback: calcular horas do dia inteiro se não houver sessões com tempo
+    if (hoursWorked === null && workDay.startTime && workDay.endTime) {
       const [startH, startM] = workDay.startTime.split(':').map(Number);
       const [endH, endM] = workDay.endTime.split(':').map(Number);
       const startMinutes = startH * 60 + startM;
@@ -38,15 +70,23 @@ export async function GET(
       if (hoursWorked < 0) hoursWorked += 24;
     }
 
+    // Calcular último KM da sessão
+    let lastSessionKm: number | null = null;
+    if (workDay.drivingSessions && workDay.drivingSessions.length > 0) {
+      const lastSession = workDay.drivingSessions[workDay.drivingSessions.length - 1];
+      lastSessionKm = lastSession.endKm || lastSession.startKm;
+    }
+
+    // Contar sessões de condução
+    const sessionCount = workDay.drivingSessions?.length || 0;
+
     return NextResponse.json({
       ...workDay,
       kmTraveled,
       hoursWorked: hoursWorked ? parseFloat(hoursWorked.toFixed(2)) : null,
       totalEvents: workDay.events.length,
-      // Último KM registrado (útil para pausar/retomar)
-      lastSessionKm: workDay.drivingSessions?.length > 0 
-        ? (workDay.drivingSessions[workDay.drivingSessions.length - 1].endKm || workDay.drivingSessions[workDay.drivingSessions.length - 1].startKm)
-        : workDay.startKm
+      lastSessionKm,
+      sessionCount
     });
   } catch (error) {
     console.error('Error fetching work day:', error);

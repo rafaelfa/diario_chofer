@@ -1796,68 +1796,216 @@ export default function DiarioMotorista() {
       {/* Diálogo: Visualizar Registro */}
       {viewingDay && (
         <Dialog open={!!viewingDay} onOpenChange={() => setViewingDay(null)}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Eye className="h-5 w-5 text-blue-600" />
                 Detalhes da Jornada
               </DialogTitle>
-              <DialogDescription>
+              <DialogDescription className="flex items-center gap-2">
                 {formatDate(viewingDay.date)}
+                {viewingDay.matricula && (
+                  <Badge variant="outline" className="ml-2 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                    <Truck className="h-3 w-3 mr-1" />
+                    {viewingDay.matricula}
+                  </Badge>
+                )}
               </DialogDescription>
             </DialogHeader>
             
             <div className="space-y-4">
-              {/* Horários */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Início</p>
-                  <p className="font-semibold">{viewingDay.startTime}</p>
-                  {viewingDay.startCountry && <p className="text-xs text-muted-foreground">{viewingDay.startCountry}</p>}
-                </div>
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Fim</p>
-                  <p className="font-semibold">{viewingDay.endTime || '--:--'}</p>
-                  {viewingDay.endCountry && <p className="text-xs text-muted-foreground">{viewingDay.endCountry}</p>}
-                </div>
-              </div>
-              
-              {/* KM */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-xs text-muted-foreground">KM Inicial</p>
-                  <p className="font-semibold">{viewingDay.startKm?.toLocaleString() || '--'}</p>
-                </div>
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-xs text-muted-foreground">KM Final</p>
-                  <p className="font-semibold">{viewingDay.endKm?.toLocaleString() || '--'}</p>
-                </div>
-              </div>
-              
-              {/* Resumo */}
+              {/* Resumo Total */}
               <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="p-2 bg-emerald-50 dark:bg-emerald-900/30 rounded">
-                  <p className="font-bold text-emerald-600">{viewingDay.hoursWorked || '--'}h</p>
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-lg">
+                  <p className="text-xl font-bold text-emerald-600">{viewingDay.hoursWorked || '--'}h</p>
                   <p className="text-xs text-muted-foreground">trabalhadas</p>
                 </div>
-                <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded">
-                  <p className="font-bold text-blue-600">{viewingDay.kmTraveled || '--'}</p>
-                  <p className="text-xs text-muted-foreground">km</p>
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+                  <p className="text-xl font-bold text-blue-600">{viewingDay.kmTraveled || '--'}</p>
+                  <p className="text-xs text-muted-foreground">km total</p>
                 </div>
-                <div className="p-2 bg-amber-50 dark:bg-amber-900/30 rounded">
-                  <p className="font-bold text-amber-600">{viewingDay.events.length}</p>
-                  <p className="text-xs text-muted-foreground">eventos</p>
+                <div className="p-3 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
+                  <p className="text-xl font-bold text-purple-600">{viewingDay.sessionCount || 1}</p>
+                  <p className="text-xs text-muted-foreground">turno{(viewingDay.sessionCount || 1) > 1 ? 's' : ''}</p>
+                </div>
+              </div>
+              
+              {/* Timeline de Turnos */}
+              <div className="border rounded-lg p-3 bg-slate-50 dark:bg-slate-800/50">
+                <p className="text-sm font-semibold mb-3 flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  Turnos de Condução
+                </p>
+                
+                {viewingDay.drivingSessions && viewingDay.drivingSessions.length > 0 ? (
+                  <div className="space-y-3">
+                    {viewingDay.drivingSessions.map((session, index) => {
+                      // Calcular KM e duração da sessão
+                      const sessionKm = session.startKm && session.endKm 
+                        ? session.endKm - session.startKm 
+                        : null;
+                      
+                      // Calcular duração
+                      let sessionDuration = '';
+                      if (session.startTime && session.endTime) {
+                        const [startH, startM] = session.startTime.split(':').map(Number);
+                        const [endH, endM] = session.endTime.split(':').map(Number);
+                        let diffMins = (endH * 60 + endM) - (startH * 60 + startM);
+                        if (diffMins < 0) diffMins += 24 * 60;
+                        const hours = Math.floor(diffMins / 60);
+                        const mins = diffMins % 60;
+                        sessionDuration = `${hours}h${mins > 0 ? ` ${mins}min` : ''}`;
+                      }
+                      
+                      const isPaused = session.status === 'paused';
+                      const isActive = session.status === 'active';
+                      
+                      return (
+                        <div key={session.id}>
+                          {/* Linha do tempo */}
+                          <div className="flex items-start gap-3">
+                            {/* Indicador visual */}
+                            <div className="flex flex-col items-center">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                                isPaused ? 'bg-amber-500' : isActive ? 'bg-emerald-500' : 'bg-emerald-600'
+                              }`}>
+                                {index + 1}
+                              </div>
+                              {index < (viewingDay.drivingSessions?.length || 0) - 1 && (
+                                <div className="w-0.5 h-8 bg-slate-300 dark:bg-slate-600 my-1" />
+                              )}
+                            </div>
+                            
+                            {/* Conteúdo do turno */}
+                            <div className={`flex-1 p-3 rounded-lg border ${
+                              isPaused 
+                                ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' 
+                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                            }`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className={
+                                    isPaused 
+                                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border-amber-300'
+                                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-300'
+                                  }>
+                                    {isPaused ? '⏸ Pausado' : isActive ? '▶ Em curso' : '✓ Concluído'}
+                                  </Badge>
+                                  {sessionDuration && (
+                                    <span className="text-xs text-muted-foreground font-mono">{sessionDuration}</span>
+                                  )}
+                                </div>
+                              </div>
+                              
+                              {/* Horários */}
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="font-mono text-sm font-semibold">{session.startTime}</span>
+                                <span className="text-muted-foreground">→</span>
+                                <span className="font-mono text-sm font-semibold">{session.endTime || '--:--'}</span>
+                              </div>
+                              
+                              {/* KM */}
+                              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                                <div className="bg-slate-100 dark:bg-slate-700 rounded p-1.5">
+                                  <p className="text-muted-foreground">KM Início</p>
+                                  <p className="font-semibold">{session.startKm?.toLocaleString() || '--'}</p>
+                                </div>
+                                <div className="bg-slate-100 dark:bg-slate-700 rounded p-1.5">
+                                  <p className="text-muted-foreground">KM Fim</p>
+                                  <p className="font-semibold">{session.endKm?.toLocaleString() || '--'}</p>
+                                </div>
+                                <div className={`rounded p-1.5 ${sessionKm ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'bg-slate-100 dark:bg-slate-700'}`}>
+                                  <p className="text-muted-foreground">Percorrido</p>
+                                  <p className="font-semibold">{sessionKm ? `${sessionKm} km` : '--'}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Indicador de pausa entre turnos */}
+                          {index < (viewingDay.drivingSessions?.length || 0) - 1 && (
+                            <div className="ml-4 my-2 flex items-center gap-2 text-xs text-muted-foreground">
+                              <div className="flex-1 border-t border-dashed border-slate-300 dark:border-slate-600" />
+                              <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                                ⏸ Pausa / Troca de motorista
+                              </span>
+                              <div className="flex-1 border-t border-dashed border-slate-300 dark:border-slate-600" />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* Jornada simples (sem sessões registradas) */
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-white font-bold text-sm">
+                      1
+                    </div>
+                    <div className="flex-1 p-3 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge variant="outline" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-300">
+                          ✓ Turno Único
+                        </Badge>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-mono text-sm font-semibold">{viewingDay.startTime}</span>
+                        <span className="text-muted-foreground">→</span>
+                        <span className="font-mono text-sm font-semibold">{viewingDay.endTime || '--:--'}</span>
+                        {viewingDay.startCountry && (
+                          <span className="text-xs text-muted-foreground ml-2">
+                            ({viewingDay.startCountry} → {viewingDay.endCountry || '?'})
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div className="bg-slate-100 dark:bg-slate-700 rounded p-1.5">
+                          <p className="text-muted-foreground">KM Início</p>
+                          <p className="font-semibold">{viewingDay.startKm?.toLocaleString() || '--'}</p>
+                        </div>
+                        <div className="bg-slate-100 dark:bg-slate-700 rounded p-1.5">
+                          <p className="text-muted-foreground">KM Fim</p>
+                          <p className="font-semibold">{viewingDay.endKm?.toLocaleString() || '--'}</p>
+                        </div>
+                        <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded p-1.5">
+                          <p className="text-muted-foreground">Percorrido</p>
+                          <p className="font-semibold">{viewingDay.kmTraveled || '--'} km</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Legenda */}
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full bg-emerald-500" />
+                  <span>Concluído</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Em curso</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full bg-amber-500" />
+                  <span>Pausado</span>
                 </div>
               </div>
               
               {/* Eventos */}
               {viewingDay.events.length > 0 && (
-                <div>
-                  <p className="text-sm font-medium mb-2">Eventos do dia:</p>
-                  <div className="space-y-2 max-h-40 overflow-auto">
+                <div className="border rounded-lg p-3">
+                  <p className="text-sm font-semibold mb-2 flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    Eventos do dia ({viewingDay.events.length})
+                  </p>
+                  <div className="space-y-1.5 max-h-32 overflow-auto">
                     {viewingDay.events.map((event) => (
                       <div key={event.id} className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded text-sm">
-                        <span className="font-mono text-xs text-muted-foreground">{event.time}</span>
+                        <Badge variant="outline" className="font-mono text-xs">{event.time}</Badge>
                         <span>{event.description}</span>
                       </div>
                     ))}
@@ -1875,29 +2023,23 @@ export default function DiarioMotorista() {
                 </div>
               )}
               
+              {/* Check do caminhão */}
               {viewingDay.truckCheck && (
-                <Badge variant="outline" className="w-full justify-center py-2">
-                  <CheckCircle2 className="h-4 w-4 mr-2 text-emerald-600" />
-                  Check do caminhão realizado
-                </Badge>
-              )}
-              
-              {viewingDay.matricula && (
-                <Badge variant="outline" className="w-full justify-center py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800">
-                  <Truck className="h-4 w-4 mr-2" />
-                  Matrícula: {viewingDay.matricula}
+                <Badge variant="outline" className="w-full justify-center py-2 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800">
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                  Check do caminhão realizado ✓
                 </Badge>
               )}
             </div>
             
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setViewingDay(null)}>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setViewingDay(null)} className="w-full sm:w-auto">
                 Fechar
               </Button>
               <Button onClick={() => {
                 setViewingDay(null);
                 handleEditClick(viewingDay);
-              }} className="bg-amber-600 hover:bg-amber-700">
+              }} className="bg-amber-600 hover:bg-amber-700 w-full sm:w-auto">
                 <Pencil className="h-4 w-4 mr-2" />
                 Editar
               </Button>

@@ -812,11 +812,11 @@ export default function DiarioMotorista() {
     }
   };
 
-  // Gerar PDF - versão corrigida para mobile
-  const generatePdf = async (type: 'weekly' | 'monthly', matricula?: string) => {
+  // Gerar PDF - versão corrigida para mobile e desktop
+  const generatePdf = async (type: 'weekly' | 'monthly', matricula?: string, format: 'pdf' | 'html' = 'pdf') => {
     setLoadingPdf(true);
     try {
-      const params = new URLSearchParams({ type });
+      const params = new URLSearchParams({ type, format });
       if (matricula) params.append('matricula', matricula);
       
       // Adicionar datas personalizadas se definidas
@@ -828,24 +828,42 @@ export default function DiarioMotorista() {
       
       const res = await fetch(`/api/reports/pdf?${params.toString()}`);
       if (res.ok) {
-        const data = await res.json();
-        
-        // Criar arquivo HTML para download (funciona em mobile)
-        const blob = new Blob([data.html], { type: 'text/html;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        
-        // Criar link de download
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `relatorio-diario-motorista-${new Date().toISOString().split('T')[0]}.html`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-        showToast('Relatório baixado! Abra o arquivo para imprimir.', 'success');
+        if (format === 'pdf') {
+          // Baixar PDF real
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          
+          // Criar link de download
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `relatorio-motorista-${new Date().toISOString().split('T')[0]}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          
+          showToast('PDF baixado com sucesso!', 'success');
+        } else {
+          // Baixar HTML
+          const data = await res.json();
+          const blob = new Blob([data.html], { type: 'text/html;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `relatorio-motorista-${new Date().toISOString().split('T')[0]}.html`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          
+          showToast('HTML baixado! Abra no navegador para imprimir.', 'success');
+        }
+      } else {
+        showToast('Erro ao gerar relatório', 'error');
       }
     } catch (error) {
+      console.error('Erro ao gerar relatório:', error);
       showToast('Erro ao gerar relatório', 'error');
     } finally {
       setLoadingPdf(false);
@@ -1756,19 +1774,33 @@ export default function DiarioMotorista() {
                     </div>
                   )}
                   
-                  {/* Botão de gerar */}
-                  <Button 
-                    onClick={() => generatePdf(reportType)}
-                    disabled={loadingPdf || (showCustomDate && (!customDateStart || !customDateEnd))}
-                    className="w-full bg-blue-600 hover:bg-blue-700 h-12"
-                  >
-                    {loadingPdf ? (
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
+                  {/* Botões de gerar PDF e HTML */}
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={() => generatePdf(reportType, undefined, 'pdf')}
+                      disabled={loadingPdf || (showCustomDate && (!customDateStart || !customDateEnd))}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 h-12"
+                    >
+                      {loadingPdf ? (
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <FileText className="h-4 w-4 mr-2" />
+                      )}
+                      PDF
+                    </Button>
+                    <Button 
+                      onClick={() => generatePdf(reportType, undefined, 'html')}
+                      disabled={loadingPdf || (showCustomDate && (!customDateStart || !customDateEnd))}
+                      variant="outline"
+                      className="flex-1 h-12"
+                    >
                       <Download className="h-4 w-4 mr-2" />
-                    )}
-                    {showCustomDate ? 'Gerar PDF (Período)' : `Gerar PDF ${reportType === 'weekly' ? 'Semanal' : 'Mensal'}`}
-                  </Button>
+                      HTML
+                    </Button>
+                  </div>
+                  <p className="text-xs text-center text-muted-foreground">
+                    {showCustomDate ? 'Período personalizado' : `${reportType === 'weekly' ? 'Semanal' : 'Mensal'}`}
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -1857,11 +1889,20 @@ export default function DiarioMotorista() {
                       <Button 
                         size="sm" 
                         variant="outline"
-                        onClick={() => generatePdf(reportType, selectedVehicle)}
+                        onClick={() => generatePdf(reportType, selectedVehicle, 'pdf')}
+                        disabled={loadingPdf}
+                      >
+                        <FileText className="h-3 w-3 mr-1" />
+                        PDF
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => generatePdf(reportType, selectedVehicle, 'html')}
                         disabled={loadingPdf}
                       >
                         <Download className="h-3 w-3 mr-1" />
-                        PDF
+                        HTML
                       </Button>
                       <Button 
                         size="sm" 

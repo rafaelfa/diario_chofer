@@ -7,10 +7,15 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const matricula = searchParams.get('matricula');
 
-    // Buscar todos os dias com matrícula
+    // Buscar todos os dias com matrícula - INCLUIR drivingSessions
     const workDays = await db.workDay.findMany({
       where: matricula ? { matricula: matricula.toUpperCase() } : { matricula: { not: null } },
-      include: { events: true },
+      include: { 
+        events: true,
+        drivingSessions: {
+          orderBy: { startTime: 'asc' }
+        }
+      },
       orderBy: { date: 'desc' }
     });
 
@@ -39,10 +44,18 @@ export async function GET(request: NextRequest) {
       stats[key].viagens++;
       stats[key].diasTrabalhados.add(day.date.toISOString().split('T')[0]);
 
-      // KM
-      if (day.endKm && day.startKm) {
+      // KM - Calcular pelas sessões de condução (correto para dupla de motoristas)
+      if (day.drivingSessions && day.drivingSessions.length > 0) {
+        day.drivingSessions.forEach(session => {
+          if (session.startKm && session.endKm) {
+            stats[key].totalKm += session.endKm - session.startKm;
+          }
+        });
+      } else if (day.endKm && day.startKm) {
+        // Fallback para registros antigos sem sessões
         stats[key].totalKm += day.endKm - day.startKm;
       }
+
       if (day.endKm) {
         stats[key].kmFinal = Math.max(stats[key].kmFinal || 0, day.endKm);
       }
@@ -50,8 +63,19 @@ export async function GET(request: NextRequest) {
         stats[key].kmInicial = day.startKm;
       }
 
-      // Horas
-      if (day.startTime && day.endTime) {
+      // Horas - Calcular pelas sessões de condução
+      if (day.drivingSessions && day.drivingSessions.length > 0) {
+        day.drivingSessions.forEach(session => {
+          if (session.startTime && session.endTime) {
+            const [startH, startM] = session.startTime.split(':').map(Number);
+            const [endH, endM] = session.endTime.split(':').map(Number);
+            let hours = ((endH * 60 + endM) - (startH * 60 + startM)) / 60;
+            if (hours < 0) hours += 24;
+            stats[key].totalHoras += hours;
+          }
+        });
+      } else if (day.startTime && day.endTime) {
+        // Fallback para registros antigos
         const [startH, startM] = day.startTime.split(':').map(Number);
         const [endH, endM] = day.endTime.split(':').map(Number);
         let hours = ((endH * 60 + endM) - (startH * 60 + startM)) / 60;

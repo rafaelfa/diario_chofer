@@ -18,12 +18,14 @@ export async function GET(request: NextRequest) {
       startDate = new Date(referenceDate);
       startDate.setDate(referenceDate.getDate() - diff);
       startDate.setHours(0, 0, 0, 0);
+
       endDate = new Date(startDate);
       endDate.setDate(startDate.getDate() + 6);
       endDate.setHours(23, 59, 59, 999);
     } else {
       startDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1);
       startDate.setHours(0, 0, 0, 0);
+
       endDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
       endDate.setHours(23, 59, 59, 999);
     }
@@ -51,9 +53,15 @@ export async function GET(request: NextRequest) {
       whereClause.matricula = matricula.toUpperCase();
     }
 
+    // INCLUIR drivingSessions
     const workDays = await db.workDay.findMany({
       where: whereClause,
-      include: { events: true },
+      include: {
+        events: true,
+        drivingSessions: {
+          orderBy: { startTime: 'asc' }
+        }
+      },
       orderBy: { date: 'asc' }
     });
 
@@ -75,22 +83,47 @@ export async function GET(request: NextRequest) {
       let dayKm = 0;
       let dayHours = 0;
 
-      if (day.endKm && day.startKm) {
+      // KM - Calcular pelas sessões de condução (correto para dupla de motoristas)
+      if (day.drivingSessions && day.drivingSessions.length > 0) {
+        day.drivingSessions.forEach(session => {
+          if (session.startKm && session.endKm) {
+            dayKm += session.endKm - session.startKm;
+          }
+        });
+      } else if (day.endKm && day.startKm) {
+        // Fallback para registros antigos sem sessões
         dayKm = day.endKm - day.startKm;
-        byMatricula[key].totalKm += dayKm;
       }
 
-      if (day.startTime && day.endTime) {
+      byMatricula[key].totalKm += dayKm;
+
+      // Horas - Calcular pelas sessões de condução
+      if (day.drivingSessions && day.drivingSessions.length > 0) {
+        day.drivingSessions.forEach(session => {
+          if (session.startTime && session.endTime) {
+            const [startH, startM] = session.startTime.split(':').map(Number);
+            const [endH, endM] = session.endTime.split(':').map(Number);
+            const startMinutes = startH * 60 + startM;
+            const endMinutes = endH * 60 + endM;
+            let diff = endMinutes - startMinutes;
+            if (diff < 0) diff += 24 * 60;
+            dayHours += diff / 60;
+          }
+        });
+      } else if (day.startTime && day.endTime) {
+        // Fallback para registros antigos
         const [startH, startM] = day.startTime.split(':').map(Number);
         const [endH, endM] = day.endTime.split(':').map(Number);
         const startMinutes = startH * 60 + startM;
         const endMinutes = endH * 60 + endM;
         dayHours = (endMinutes - startMinutes) / 60;
         if (dayHours < 0) dayHours += 24;
-        byMatricula[key].totalHours += dayHours;
       }
 
+      byMatricula[key].totalHours += dayHours;
+
       byMatricula[key].totalEvents += day.events.length;
+
       byMatricula[key].days.push({
         date: day.date,
         startTime: day.startTime,

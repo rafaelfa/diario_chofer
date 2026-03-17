@@ -23,7 +23,7 @@ import {
   AlertTriangle, CheckCircle2, Calendar, FileText, ChevronRight,
   Sun, Moon, Activity, X, AlertCircle, RefreshCw, LogOut, User,
   Eye, Pencil, Trash2, Save, Download, BarChart3, History, Car,
-  Navigation, Wifi, WifiOff, CloudOff, Pause, FastForward
+  Navigation, Wifi, WifiOff, Pause, FastForward, Menu
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useGeolocation } from '@/hooks/use-geolocation';
@@ -207,6 +207,9 @@ export default function DiarioMotorista() {
   const [showPauseDialog, setShowPauseDialog] = useState(false);
   const [pauseKm, setPauseKm] = useState('');
   const [isProcessingPause, setIsProcessingPause] = useState(false);
+  
+  // Estado para menu mobile
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Mostrar toast
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning') => {
@@ -280,6 +283,21 @@ export default function DiarioMotorista() {
       console.error('Erro ao buscar último KM:', error);
     } finally {
       setCheckingMatricula(false);
+    }
+  };
+
+  // Formatar matrícula automaticamente (AA-00-BB)
+  const formatMatricula = (value: string): string => {
+    // Remove tudo que não é letra ou número
+    const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    
+    // Aplica o formato AA-00-BB
+    if (cleaned.length <= 2) {
+      return cleaned;
+    } else if (cleaned.length <= 4) {
+      return `${cleaned.slice(0, 2)}-${cleaned.slice(2)}`;
+    } else {
+      return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 4)}-${cleaned.slice(4, 6)}`;
     }
   };
 
@@ -843,6 +861,23 @@ export default function DiarioMotorista() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gpsCountry, loadingGps]);
 
+  // Detectar país automaticamente quando abrir o formulário de fim de dia
+  useEffect(() => {
+    if (showEndForm && !endForm.endCountry) {
+      getLocation();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEndForm]);
+
+  // Preencher país no fim do dia quando GPS detectar
+  useEffect(() => {
+    if (gpsCountry && showEndForm && !endForm.endCountry && !loadingGps) {
+      setEndForm(prev => ({ ...prev, endCountry: gpsCountry }));
+      showToast(`País de fim detectado: ${gpsCountry}`, 'success');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gpsCountry, loadingGps, showEndForm]);
+
   // Carregar estatísticas quando mudar para view de relatórios
   useEffect(() => {
     if (activeView === 'reports') {
@@ -902,40 +937,36 @@ export default function DiarioMotorista() {
 
       {/* Header */}
       <header className="sticky top-0 z-40 border-b bg-white/90 backdrop-blur-sm dark:bg-slate-900/90">
-        <div className="container mx-auto px-4 py-3">
+        <div className="container mx-auto px-3 py-2">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="bg-emerald-600 p-2 rounded-xl">
-                <Truck className="h-6 w-6 text-white" />
+            {/* Logo e Título */}
+            <div className="flex items-center gap-2">
+              <div className="bg-emerald-600 p-1.5 rounded-lg">
+                <Truck className="h-5 w-5 text-white" />
               </div>
               <div>
-                <h1 className="text-lg font-bold text-slate-900 dark:text-white">Diário do Motorista</h1>
-                <p className="text-xs text-slate-500">
+                <h1 className="text-base font-bold text-slate-900 dark:text-white">Diário do Motorista</h1>
+                <p className="text-xs text-slate-500 hidden sm:block">
                   {new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </p>
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
-              {/* Status Online/Offline */}
-              <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs ${
-                isOnline 
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' 
-                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-              }`}>
-                {isOnline ? (
-                  <>
-                    <Wifi className="h-3 w-3" />
-                    <span className="hidden sm:inline">Online</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="h-3 w-3" />
-                    <span className="hidden sm:inline">Offline</span>
-                  </>
-                )}
-              </div>
-              
+            {/* Status Online/Offline - visível sempre */}
+            <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs ${
+              isOnline 
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' 
+                : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+            }`}>
+              {isOnline ? (
+                <Wifi className="h-3 w-3" />
+              ) : (
+                <WifiOff className="h-3 w-3" />
+              )}
+            </div>
+            
+            {/* Menu Desktop - oculto no mobile */}
+            <div className="hidden sm:flex items-center gap-1">
               <Button 
                 variant="ghost" 
                 size="sm"
@@ -962,7 +993,7 @@ export default function DiarioMotorista() {
               </Button>
               
               {/* Usuário e Logout */}
-              <div className="hidden sm:flex items-center gap-2 ml-2 pl-2 border-l">
+              <div className="flex items-center gap-2 ml-2 pl-2 border-l">
                 <div className="flex items-center gap-1 text-sm text-muted-foreground">
                   <User className="h-4 w-4" />
                   <span>{currentUser?.username}</span>
@@ -977,27 +1008,92 @@ export default function DiarioMotorista() {
                 </Button>
               </div>
             </div>
+            
+            {/* Menu Hambúrguer - visível apenas no mobile */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="sm:hidden"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
           </div>
+          
+          {/* Menu Mobile Expandido */}
+          {mobileMenuOpen && (
+            <div className="sm:hidden mt-2 pt-2 border-t space-y-1">
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start"
+                onClick={() => {
+                  setActiveView('main');
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <Sun className="h-4 w-4 mr-2" />
+                Hoje
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start"
+                onClick={() => {
+                  setActiveView('history');
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <History className="h-4 w-4 mr-2" />
+                Histórico
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start"
+                onClick={() => {
+                  setActiveView('reports');
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Relatórios
+              </Button>
+              <Separator className="my-2" />
+              <div className="flex items-center justify-between px-3 py-2 text-sm">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <User className="h-4 w-4" />
+                  <span>{currentUser?.username}</span>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={handleLogout}
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  <LogOut className="h-4 w-4 mr-1" />
+                  Sair
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-4 pb-20">
+      <main className="container mx-auto px-3 py-3 pb-20">
         {/* VIEW: MAIN (Dia Atual) */}
         {activeView === 'main' && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             
             {/* STATUS DO DIA */}
             {!currentDay ? (
               /* DIA NÃO INICIADO */
               <Card className="border-2 border-dashed border-slate-300 dark:border-slate-700">
                 <CardContent className="pt-6">
-                  <div className="text-center space-y-4">
-                    <div className="bg-slate-100 dark:bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
-                      <Sun className="h-8 w-8 text-amber-500" />
+                  <div className="text-center space-y-3">
+                    <div className="bg-slate-100 dark:bg-slate-800 w-14 h-14 rounded-full flex items-center justify-center mx-auto">
+                      <Sun className="h-7 w-7 text-amber-500" />
                     </div>
                     <div>
-                      <h2 className="text-xl font-semibold">Bom dia, motorista!</h2>
-                      <p className="text-muted-foreground">Pronto para iniciar o dia de trabalho?</p>
+                      <h2 className="text-lg font-semibold">Bom dia, motorista!</h2>
+                      <p className="text-sm text-muted-foreground">Pronto para iniciar o dia?</p>
                     </div>
                     
                     <Separator className="my-4" />
@@ -1010,17 +1106,17 @@ export default function DiarioMotorista() {
                           placeholder="Ex: PT-12-AB"
                           value={startForm.matricula}
                           onChange={(e) => {
-                            const value = e.target.value.toUpperCase();
-                            setStartForm({...startForm, matricula: value});
+                            const formatted = formatMatricula(e.target.value);
+                            setStartForm({...startForm, matricula: formatted});
                             // Buscar último KM quando a matrícula estiver completa
-                            if (value.length === 8) {
-                              checkLastKm(value);
+                            if (formatted.length === 8) {
+                              checkLastKm(formatted);
                             } else {
                               setLastKmInfo(null);
                             }
                           }}
                           maxLength={8}
-                          className="uppercase"
+                          className="uppercase text-center font-mono text-lg tracking-wider"
                         />
                         {checkingMatricula && (
                           <p className="text-xs text-muted-foreground">Verificando último registro...</p>
@@ -1243,26 +1339,33 @@ export default function DiarioMotorista() {
                     
                     {showEventInput ? (
                       <div className="space-y-3 p-3 border rounded-lg bg-slate-50 dark:bg-slate-800">
-                        <div className="grid grid-cols-4 gap-2">
-                          <Input
-                            type="time"
-                            value={newEvent.time}
-                            onChange={(e) => setNewEvent({...newEvent, time: e.target.value})}
-                            placeholder="Hora"
-                            className="col-span-1"
-                          />
+                        {/* Layout mobile-friendly: hora em linha separada */}
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+                              <Clock className="h-3 w-3" />
+                              <span>Hora:</span>
+                            </div>
+                            <Input
+                              type="time"
+                              value={newEvent.time}
+                              onChange={(e) => setNewEvent({...newEvent, time: e.target.value})}
+                              className="flex-1 h-10 text-base"
+                            />
+                          </div>
                           <Input
                             placeholder="Descreva o evento..."
                             value={newEvent.description}
                             onChange={(e) => setNewEvent({...newEvent, description: e.target.value})}
-                            className="col-span-3"
+                            className="h-11"
                           />
                         </div>
                         <div className="flex gap-2">
-                          <Button variant="outline" onClick={() => setShowEventInput(false)} className="flex-1">
+                          <Button variant="outline" onClick={() => setShowEventInput(false)} className="flex-1 h-10">
                             Cancelar
                           </Button>
-                          <Button onClick={handleAddEvent} className="flex-1 bg-emerald-600 hover:bg-emerald-700">
+                          <Button onClick={handleAddEvent} className="flex-1 bg-emerald-600 hover:bg-emerald-700 h-10">
+                            <Plus className="h-4 w-4 mr-1" />
                             Adicionar
                           </Button>
                         </div>

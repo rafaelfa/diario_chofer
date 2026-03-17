@@ -44,10 +44,8 @@ export default function DownloadsPage() {
   
   let files: FileInfo[] = [];
   try {
-    // Verificar se o diretório existe antes de ler
-    if (fs.existsSync(downloadDir)) {
-      const filenames = fs.readdirSync(downloadDir);
-      files = filenames
+    const filenames = fs.readdirSync(downloadDir);
+    files = filenames
       .filter(f => !f.startsWith('.'))
       .map(filename => {
         const filepath = path.join(downloadDir, filename);
@@ -65,7 +63,6 @@ export default function DownloadsPage() {
         if (b.name.includes('v3_matricula')) return 1;
         return b.name.localeCompare(a.name);
       });
-    } // fim do if existsSync
   } catch (e) {
     console.error('Erro ao ler diretório:', e);
   }

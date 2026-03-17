@@ -168,9 +168,6 @@ export default function DiarioMotorista() {
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [vehicleHistory, setVehicleHistory] = useState<VehicleHistory[]>([]);
   const [reportType, setReportType] = useState<'weekly' | 'monthly'>('weekly');
-  const [customDateStart, setCustomDateStart] = useState('');
-  const [customDateEnd, setCustomDateEnd] = useState('');
-  const [showCustomDate, setShowCustomDate] = useState(false);
   const [loadingVehicles, setLoadingVehicles] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
   
@@ -812,58 +809,26 @@ export default function DiarioMotorista() {
     }
   };
 
-  // Gerar PDF - versão corrigida para mobile e desktop
-  const generatePdf = async (type: 'weekly' | 'monthly', matricula?: string, format: 'pdf' | 'html' = 'pdf') => {
+  // Gerar PDF
+  const generatePdf = async (type: 'weekly' | 'monthly', matricula?: string) => {
     setLoadingPdf(true);
     try {
-      const params = new URLSearchParams({ type, format });
+      const params = new URLSearchParams({ type });
       if (matricula) params.append('matricula', matricula);
-      
-      // Adicionar datas personalizadas se definidas
-      if (showCustomDate && customDateStart && customDateEnd) {
-        params.append('date', customDateEnd); // API usa essa data como referência
-        params.append('startDate', customDateStart);
-        params.append('endDate', customDateEnd);
-      }
       
       const res = await fetch(`/api/reports/pdf?${params.toString()}`);
       if (res.ok) {
-        if (format === 'pdf') {
-          // Baixar PDF real
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          
-          // Criar link de download
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `relatorio-motorista-${new Date().toISOString().split('T')[0]}.pdf`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-          
-          showToast('PDF baixado com sucesso!', 'success');
-        } else {
-          // Baixar HTML
-          const data = await res.json();
-          const blob = new Blob([data.html], { type: 'text/html;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `relatorio-motorista-${new Date().toISOString().split('T')[0]}.html`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-          
-          showToast('HTML baixado! Abra no navegador para imprimir.', 'success');
+        const data = await res.json();
+        
+        // Abrir HTML em nova janela para impressão
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(data.html);
+          printWindow.document.close();
+          printWindow.print();
         }
-      } else {
-        showToast('Erro ao gerar relatório', 'error');
       }
     } catch (error) {
-      console.error('Erro ao gerar relatório:', error);
       showToast('Erro ao gerar relatório', 'error');
     } finally {
       setLoadingPdf(false);
@@ -1708,99 +1673,27 @@ export default function DiarioMotorista() {
 
             {/* Gerar PDF */}
             <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20">
-              <CardContent className="pt-4 space-y-4">
-                {/* Tipo de relatório */}
+              <CardContent className="pt-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <FileText className="h-5 w-5 text-blue-600" />
                     <div>
-                      <p className="font-medium">Gerar Relatório</p>
-                      <p className="text-xs text-muted-foreground">Download em HTML para impressão</p>
+                      <p className="font-medium">Gerar Relatório {reportType === 'weekly' ? 'Semanal' : 'Mensal'}</p>
+                      <p className="text-xs text-muted-foreground">Abrirá em nova janela para impressão/PDF</p>
                     </div>
                   </div>
-                </div>
-                
-                {/* Opções de período */}
-                <div className="space-y-3">
-                  <div className="flex flex-wrap gap-2">
-                    <Button 
-                      variant={!showCustomDate && reportType === 'weekly' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => { setReportType('weekly'); setShowCustomDate(false); }}
-                      className={!showCustomDate && reportType === 'weekly' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                    >
-                      Semana
-                    </Button>
-                    <Button 
-                      variant={!showCustomDate && reportType === 'monthly' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => { setReportType('monthly'); setShowCustomDate(false); }}
-                      className={!showCustomDate && reportType === 'monthly' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
-                    >
-                      Mês
-                    </Button>
-                    <Button 
-                      variant={showCustomDate ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setShowCustomDate(!showCustomDate)}
-                      className={showCustomDate ? 'bg-blue-600 hover:bg-blue-700' : ''}
-                    >
-                      <Calendar className="h-3 w-3 mr-1" />
-                      Período
-                    </Button>
-                  </div>
-                  
-                  {/* Seletor de datas personalizadas */}
-                  {showCustomDate && (
-                    <div className="grid grid-cols-2 gap-3 p-3 bg-white dark:bg-slate-800 rounded-lg">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Data Início</Label>
-                        <Input 
-                          type="date"
-                          value={customDateStart}
-                          onChange={(e) => setCustomDateStart(e.target.value)}
-                          className="h-10"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Data Fim</Label>
-                        <Input 
-                          type="date"
-                          value={customDateEnd}
-                          onChange={(e) => setCustomDateEnd(e.target.value)}
-                          className="h-10"
-                        />
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Botões de gerar PDF e HTML */}
-                  <div className="flex gap-2">
-                    <Button 
-                      onClick={() => generatePdf(reportType, undefined, 'pdf')}
-                      disabled={loadingPdf || (showCustomDate && (!customDateStart || !customDateEnd))}
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 h-12"
-                    >
-                      {loadingPdf ? (
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <FileText className="h-4 w-4 mr-2" />
-                      )}
-                      PDF
-                    </Button>
-                    <Button 
-                      onClick={() => generatePdf(reportType, undefined, 'html')}
-                      disabled={loadingPdf || (showCustomDate && (!customDateStart || !customDateEnd))}
-                      variant="outline"
-                      className="flex-1 h-12"
-                    >
+                  <Button 
+                    onClick={() => generatePdf(reportType)}
+                    disabled={loadingPdf}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {loadingPdf ? (
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
                       <Download className="h-4 w-4 mr-2" />
-                      HTML
-                    </Button>
-                  </div>
-                  <p className="text-xs text-center text-muted-foreground">
-                    {showCustomDate ? 'Período personalizado' : `${reportType === 'weekly' ? 'Semanal' : 'Mensal'}`}
-                  </p>
+                    )}
+                    Gerar PDF
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -1889,20 +1782,11 @@ export default function DiarioMotorista() {
                       <Button 
                         size="sm" 
                         variant="outline"
-                        onClick={() => generatePdf(reportType, selectedVehicle, 'pdf')}
-                        disabled={loadingPdf}
-                      >
-                        <FileText className="h-3 w-3 mr-1" />
-                        PDF
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={() => generatePdf(reportType, selectedVehicle, 'html')}
+                        onClick={() => generatePdf(reportType, selectedVehicle)}
                         disabled={loadingPdf}
                       >
                         <Download className="h-3 w-3 mr-1" />
-                        HTML
+                        PDF
                       </Button>
                       <Button 
                         size="sm" 

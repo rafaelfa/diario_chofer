@@ -1,0 +1,125 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+// Usuário da aplicação (tabela separada do Supabase Auth)
+model AppUser {
+  id               String           @id @default(cuid())
+  username         String           @unique
+  passwordHash     String           @map("password_hash")
+  name             String?
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  workDays         WorkDay[]
+  events           Event[]
+  drivingSessions  DrivingSession[]
+  settings         Settings?
+
+  @@map("app_users")
+}
+
+// Dia de trabalho do motorista
+model WorkDay {
+  id            String           @id @default(cuid())
+  userId        String           @map("user_id") // OBRIGATÓRIO: isolamento por usuário
+  date          DateTime?
+  startTime     String?          @map("start_time")
+  endTime       String?          @map("end_time")
+  startCountry  String?          @map("start_country")
+  endCountry    String?          @map("end_country")
+  startKm       Int?             @map("start_km")
+  endKm         Int?             @map("end_km")
+  lastRest      String?          @map("last_rest")
+  amplitude     String?
+  truckCheck    Boolean          @default(false) @map("truck_check")
+  observations  String?
+  matricula     String?          // Matrícula do caminhão (formato europeu: AA-00-BB)
+  isPaused      Boolean          @default(false) @map("is_paused") // Indica se está pausado (outro motorista dirigindo)
+  numDrivers    Int              @default(1) @map("num_drivers") // 1 = motorista único, 2 = equipa com 2 motoristas
+  timezone      String?          // Fuso horário no início do dia (ex: "Europe/Lisbon")
+  utcOffset     String?          @map("utc_offset") // Offset UTC no início (ex: "+01:00" ou "+00:00")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  user             AppUser          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events           Event[]
+  drivingSessions  DrivingSession[]
+
+  @@index([userId])       // Índice para filtro por usuário
+  @@index([matricula])    // Índice para busca por matrícula
+  @@index([userId, date]) // Índice composto para queries comuns
+  @@map("work_days")
+}
+
+// Eventos do dia (pausas, abastecimento, fronteiras, etc.)
+model Event {
+  id          String   @id @default(cuid())
+  workDayId   String   @map("work_day_id")
+  userId      String   @map("user_id") // Para queries diretas sem JOIN
+  time        String
+  description String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  workDay     WorkDay  @relation(fields: [workDayId], references: [id], onDelete: Cascade)
+  user        AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([workDayId])
+  @@map("events")
+}
+
+// Sessões de condução (para dupla de motoristas)
+model DrivingSession {
+  id          String   @id @default(cuid())
+  workDayId   String   @map("work_day_id")
+  userId      String   @map("user_id") // Para queries diretas sem JOIN
+  startTime   String?  @map("start_time") // Hora de início da sessão
+  endTime     String?  @map("end_time")   // Hora de fim da sessão (null se em andamento)
+  startKm     Int?     @map("start_km")   // KM no início da sessão
+  endKm       Int?     @map("end_km")     // KM no fim da sessão
+  status      String   @default("active") // active, paused, ended
+  utcOffset   String?  @map("utc_offset") // Offset UTC no momento da sessão (ex: "+01:00")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  workDay     WorkDay  @relation(fields: [workDayId], references: [id], onDelete: Cascade)
+  user        AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([workDayId])
+  @@index([userId, status])
+  @@map("driving_sessions")
+}
+
+// Configurações do usuário
+model Settings {
+  id                    String   @id @default(cuid())
+  userId                String   @unique @map("user_id") // Um conjunto de configurações por usuário
+  maxDailyDrivingHours  Float    @default(9.0) @map("max_daily_driving_hours")
+  maxWeeklyDrivingHours Float    @default(56.0) @map("max_weekly_driving_hours")
+  maxContinuousDriving  Float    @default(4.5) @map("max_continuous_driving")
+  breakDuration         Int      @default(45) @map("break_duration")
+  alertBeforeMinutes    Int      @default(30) @map("alert_before_minutes")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  // Relacionamento
+  user                  AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("settings")
+}

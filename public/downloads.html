@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Downloads - Diario do Motorista</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 30px; }
+    .header h1 { color: #fff; font-size: 2rem; margin-bottom: 10px; }
+    .header p { color: #94a3b8; }
+    .card {
+      background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 15px;
+      border: 1px solid #334155; display: flex; align-items: center; gap: 15px; transition: all 0.2s;
+    }
+    .card:hover { border-color: #3b82f6; transform: translateY(-2px); box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+    .icon { font-size: 2.5rem; width: 60px; text-align: center; }
+    .info { flex: 1; }
+    .filename { color: #fff; font-weight: 600; font-size: 1rem; margin-bottom: 5px; }
+    .meta { color: #64748b; font-size: 0.85rem; }
+    .changelog { color: #94a3b8; font-size: 0.78rem; margin-top: 8px; line-height: 1.5; }
+    .changelog li { margin-bottom: 2px; }
+    .download-btn {
+      background: #3b82f6; color: #fff; padding: 12px 24px; border-radius: 8px;
+      text-decoration: none; font-weight: 600; transition: all 0.2s; white-space: nowrap;
+    }
+    .download-btn:hover { background: #2563eb; }
+    .highlight { border-color: #22c55e; background: linear-gradient(135deg, #1e293b 0%, #14532d 100%); }
+    .badge { background: #22c55e; color: #fff; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; margin-left: 10px; }
+    .badge-blue { background: #3b82f6; color: #fff; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; margin-left: 10px; }
+    .section-title { color: #94a3b8; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; margin: 25px 0 15px; }
+    .instructions { background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 20px; border: 1px solid #334155; }
+    .instructions h3 { color: #22c55e; margin-bottom: 15px; }
+    .instructions ol { color: #cbd5e1; padding-left: 20px; }
+    .instructions li { margin-bottom: 10px; }
+    .instructions code { background: #0f172a; padding: 2px 8px; border-radius: 4px; color: #22c55e; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Downloads</h1>
+      <p>Diario do Motorista - Arquivos disponiveis</p>
+    </div>
+
+    <div class="instructions">
+      <h3>Instrucoes de Instalacao</h3>
+      <ol>
+        <li>Baixe o arquivo <code>diario_chofer_v4.0.0.zip</code></li>
+        <li>Descompacte o arquivo</li>
+        <li>Copie <code>.env.example</code> para <code>.env.local</code> e preencha os valores</li>
+        <li>Execute <code>npm install</code></li>
+        <li>Execute <code>npx prisma db push</code> para criar as tabelas</li>
+        <li>Execute <code>npm run dev</code> para testar localmente</li>
+        <li>Faça deploy no Vercel</li>
+      </ol>
+    </div>
+
+    <div class="section-title">Ultima Versao (v4.0.0)</div>
+
+    <div class="card highlight">
+      <div class="icon">📦</div>
+      <div class="info">
+        <div class="filename">
+          diario_chofer_v4.0.0.zip
+          <span class="badge">ULTIMA</span>
+        </div>
+        <div class="meta">220 KB - Codigo completo v4.0.0</div>
+        <ul class="changelog">
+          <li><b>FASE 1 - Seguranca:</b></li>
+          <li>Removido Preview Mode do auth.ts - autenticacao real em todas as rotas</li>
+          <li>Endpoint de veiculos PDF agora protegido com auth + filtro userId</li>
+          <li>Logout agora destrui a sessao corretamente (destroySession)</li>
+          <li>Middleware ativo com protecao de rotas API e paginas</li>
+          <li><b>FASE 2 - Infraestrutura:</b></li>
+          <li>Prisma migrado de SQLite para PostgreSQL (Supabase-ready)</li>
+          <li>vercel.json com headers de seguranca (CSP, HSTS, X-Frame-Options)</li>
+          <li>GitHub Actions CI/CD configurado (build + lint + type-check)</li>
+          <li>.env.example criado com template de variaveis</li>
+          <li>Rate-limit.ts documentado com upgrade path para Upstash Redis</li>
+          <li><b>FASE 3 - Codigo:</b></li>
+          <li>useDiarioActions decomposto em 5 hooks menores (de 831 para ~350 linhas)</li>
+          <li>Novos hooks: useConnectivity, useWorkingTime, useDayForms, useDialogManager, useReportFilters</li>
+          <li>DayTimeline com range dinamico (adaptativo aos dados do dia)</li>
+          <li>Sort de veiculos/historico corrigido</li>
+          <li>Casts "as never" removidos do page.tsx</li>
+          <li>Tipos "any" eliminados em veiculos/estatisticas</li>
+          <li>21 dependencias nao utilizadas removidas do package.json</li>
+          <li>Build sem erros - TypeScript type checking limpo</li>
+        </ul>
+      </div>
+      <a href="/diario_chofer_v4.0.0.zip" class="download-btn" download>
+        Baixar
+      </a>
+    </div>
+
+    <div class="section-title">Versoes Anteriores</div>
+
+    <div class="card">
+      <div class="icon">📦</div>
+      <div class="info">
+        <div class="filename">
+          diario_chofer_v3.9.9.zip
+          <span class="badge-blue">v3.9.9</span>
+        </div>
+        <div class="meta">224 KB - Refatoracao do page.tsx</div>
+        <ul class="changelog">
+          <li>Refatoracao completa do page.tsx - de 2715 para 213 linhas</li>
+          <li>13 componentes extraidos para /components/diario/</li>
+        </ul>
+      </div>
+      <a href="/diario_chofer_v3.9.9.zip" class="download-btn" download>
+        Baixar
+      </a>
+    </div>
+
+  </div>
+</body>
+</html>

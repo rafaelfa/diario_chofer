@@ -132,6 +132,7 @@ export default function DiarioMotorista() {
             onOpenBreak={handleOpenBreak}
             onStartBreak={handleStartBreak}
             onEndBreak={handleEndBreak}
+            workDays={workDays}
           />
         )}
 

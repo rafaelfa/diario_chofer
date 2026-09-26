@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-const CACHE_NAME = 'diario-motorista-v1';
+const CACHE_NAME = 'diario-motorista-v4';
 const OFFLINE_URL = '/offline';
 
 // Arquivos para cachear

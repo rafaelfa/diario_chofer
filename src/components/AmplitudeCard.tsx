@@ -6,28 +6,29 @@
  * Amplitude = tempo entre o início e o fim do período de trabalho diário,
  * incluindo condução, pausas e outros períodos de trabalho.
  *
- * Limites UE:
+ * Limites UE (Reg. CE 561/2006, Art. 6º e 8º + Diretiva 2002/15/CE):
  *   1 Motorista:
- *     Normal: 15h
- *     Excecional (2x/semana): 16h
- *     Máximo absoluto: 18h
+ *     Normal: 13h (amplitude diária padrão)
+ *     Excecional: 15h (máximo permitido, até 3x por semana; total semanal de
+ *     amplitudes não pode ultrapassar 65h em 2 semanas — Diretiva 2002/15/CE)
  *
  *   2 Motoristas (equipa):
- *     Normal: 21h
- *     Cada motorista deve ter pelo menos 9h de descanso em qualquer período de 30h
- *     (30h - 9h descanso = 21h de amplitude máxima)
+ *     A amplitude da equipa pode estender-se até 30h, desde que cada motorista
+ *     faça no mínimo 9h de descanso dentro desse período de 30h
+ *     (Reg. CE 561/2006, Art. 8º, nº 8). Condução individual continua limitada
+ *     a 9h/dia (10h, 2x/semana).
  *
  * Cores (1 motorista):
- *   🟢 Verde:  < 12h  — confortável
- *   🟡 Amarelo: 12h-14h — atenção
- *   🟠 Laranja: 14h-15h — próximo do limite
- *   🔴 Vermelho: > 15h — limite excedido
+ *   🟢 Verde:    < 11h   — confortável
+ *   🟡 Amarelo:  11h-12.5h — atenção
+ *   🟠 Laranja:  12.5h-13h — próximo do limite normal
+ *   🔴 Vermelho: > 13h   — excede o limite normal (só permitido como exceção até 15h, máx. 3x/semana)
  *
  * Cores (2 motoristas):
- *   🟢 Verde:  < 15h  — confortável
- *   🟡 Amarelo: 15h-18h — atenção
- *   🟠 Laranja: 18h-21h — próximo do limite
- *   🔴 Vermelho: > 21h — limite excedido
+ *   🟢 Verde:    < 15h   — confortável
+ *   🟡 Amarelo:  15h-21h — atenção
+ *   🟠 Laranja:  21h-27h — próximo do limite
+ *   🔴 Vermelho: > 27h   — exige verificação do descanso de 9h de cada motorista (limite da equipa: 30h)
  */
 
 import { Card, CardContent } from '@/components/ui/card';
@@ -95,33 +96,34 @@ const AMPLITUDE_CONFIGS: Record<AmplitudeLevel, AmplitudeConfig> = {
 };
 
 /**
- * Limites de amplitude conforme Reg. CE 561/2006
+ * Limites de amplitude conforme Reg. CE 561/2006 + Diretiva 2002/15/CE
  *
- * 1 motorista: max 15h normal (18h absoluto)
- * 2 motoristas: max 21h (cada motorista com mínimo de 9h descanso em período de 30h)
+ * 1 motorista: normal 13h, excecional até 15h (máx. 3x/semana)
+ * 2 motoristas (equipa): até 30h, com mínimo de 9h de descanso para cada
+ * motorista dentro do período de 30h (Art. 8º, nº 8)
  */
 interface AmplitudeLimits {
-  normal: number;      // Limite normal (15h solo, 21h equipa)
+  normal: number;      // Limite normal diário (13h solo)
   attention1: number;  // Primeiro limiar de atenção
-  attention2: number;  // Segundo limiar (próximo do limite)
-  absolute: number;    // Limite absoluto
+  attention2: number;  // Segundo limiar (próximo do limite normal)
+  absolute: number;    // Limite absoluto (15h solo / 30h equipa)
   label: string;       // Texto descritivo do limite
 }
 
 const AMPLITUDE_LIMITS: Record<number, AmplitudeLimits> = {
   1: {
-    normal: 15,
-    attention1: 12,
-    attention2: 14,
-    absolute: 18,
-    label: '15:00h',
+    normal: 13,
+    attention1: 11,
+    attention2: 12.5,
+    absolute: 15,
+    label: '13:00h',
   },
   2: {
-    normal: 21,
+    normal: 27,
     attention1: 15,
-    attention2: 18,
-    absolute: 21,
-    label: '21:00h',
+    attention2: 21,
+    absolute: 30,
+    label: '30:00h',
   },
 };
 
@@ -233,36 +235,41 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
           {/* Marcas de referência na barra */}
           <div className="relative h-0 mt-0.5">
             {!isTeam ? (
-              /* Referências para 1 motorista: 12h e 15h */
+              /* Referências para 1 motorista: 13h (normal) e 15h (excecional) — barra escala até 15h */
               <>
-                {/* 12h = 80% de 15h */}
-                <div className="absolute flex flex-col items-center" style={{ left: '80%' }}>
-                  <div className="w-px h-1.5 bg-amber-400" />
-                  <span className="text-[8px] text-amber-600 dark:text-amber-400 -mt-0.5">12h</span>
+                {/* 12.5h = ~83% de 15h (crítico) */}
+                <div className="absolute flex flex-col items-center" style={{ left: '83%' }}>
+                  <div className="w-px h-1.5 bg-orange-400" />
+                  <span className="text-[8px] text-orange-600 dark:text-orange-400 -mt-0.5">12.5h</span>
                 </div>
-                {/* 15h = 100% */}
-                <div className="absolute flex flex-col items-center" style={{ left: '100%', transform: 'translateX(-100%)' }}>
+                {/* 13h = ~87% de 15h (limite normal) */}
+                <div className="absolute flex flex-col items-center" style={{ left: '87%' }}>
                   <div className="w-px h-1.5 bg-red-400" />
+                  <span className="text-[8px] text-red-600 dark:text-red-400 -mt-0.5">13h</span>
+                </div>
+                {/* 15h = 100% (máximo excecional) */}
+                <div className="absolute flex flex-col items-center" style={{ left: '100%', transform: 'translateX(-100%)' }}>
+                  <div className="w-px h-1.5 bg-red-500" />
                   <span className="text-[8px] text-red-600 dark:text-red-400 -mt-0.5">15h</span>
                 </div>
               </>
             ) : (
-              /* Referências para 2 motoristas: 15h e 21h */
+              /* Referências para 2 motoristas (equipa): 21h e 30h — barra escala até 30h */
               <>
-                {/* 15h ≈ 71.4% de 21h */}
-                <div className="absolute flex flex-col items-center" style={{ left: '71.4%' }}>
+                {/* 21h = 70% de 30h */}
+                <div className="absolute flex flex-col items-center" style={{ left: '70%' }}>
                   <div className="w-px h-1.5 bg-amber-400" />
-                  <span className="text-[8px] text-amber-600 dark:text-amber-400 -mt-0.5">15h</span>
+                  <span className="text-[8px] text-amber-600 dark:text-amber-400 -mt-0.5">21h</span>
                 </div>
-                {/* 18h ≈ 85.7% de 21h */}
-                <div className="absolute flex flex-col items-center" style={{ left: '85.7%' }}>
+                {/* 27h = 90% de 30h */}
+                <div className="absolute flex flex-col items-center" style={{ left: '90%' }}>
                   <div className="w-px h-1.5 bg-orange-400" />
-                  <span className="text-[8px] text-orange-600 dark:text-orange-400 -mt-0.5">18h</span>
+                  <span className="text-[8px] text-orange-600 dark:text-orange-400 -mt-0.5">27h</span>
                 </div>
-                {/* 21h = 100% */}
+                {/* 30h = 100% (limite da equipa, com 9h descanso p/ cada) */}
                 <div className="absolute flex flex-col items-center" style={{ left: '100%', transform: 'translateX(-100%)' }}>
                   <div className="w-px h-1.5 bg-red-400" />
-                  <span className="text-[8px] text-red-600 dark:text-red-400 -mt-0.5">21h</span>
+                  <span className="text-[8px] text-red-600 dark:text-red-400 -mt-0.5">30h</span>
                 </div>
               </>
             )}
@@ -278,9 +285,11 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
           )}
           <p className={`text-xs ${level === 'excedido' || level === 'proximo' ? 'font-medium' : 'text-muted-foreground'}`}>
             {isTeam && level === 'excedido'
-              ? `Amplitude > ${limits.normal}h — equipa de 2 motoristas excedeu o limite (Reg. CE 561/2006, Art. 8º)`
+              ? `Amplitude > ${limits.normal}h — aproximan-se do limite de 30h da equipa; cada motorista deve ter mínimo 9h descanso (Reg. CE 561/2006, Art. 8º, nº 8)`
               : isTeam && level === 'proximo'
               ? `Amplitude próxima de ${limits.normal}h — cada motorista deve ter mínimo 9h descanso em 30h`
+              : !isTeam && level === 'excedido' && amplitudeHours <= limits.absolute
+              ? `Acima de 13h — permitido só como exceção (até 15h), máx. 3x/semana`
               : config.description}
           </p>
         </div>
@@ -288,27 +297,27 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
         {/* Tabela de referência rápida */}
         <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/10">
           {!isTeam ? (
-            /* Referência para 1 motorista */
+            /* Referência para 1 motorista: normal 13h, excecional até 15h */
             <div className="grid grid-cols-2 gap-1.5">
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                <span className="text-[10px] text-muted-foreground">&lt; 12h Normal</span>
+                <span className="text-[10px] text-muted-foreground">&lt; 11h Normal</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                <span className="text-[10px] text-muted-foreground">12–14h Atenção</span>
+                <span className="text-[10px] text-muted-foreground">11–12.5h Atenção</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-orange-500" />
-                <span className="text-[10px] text-muted-foreground">14–15h Crítico</span>
+                <span className="text-[10px] text-muted-foreground">12.5–13h Crítico</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                <span className="text-[10px] text-muted-foreground">&gt; 15h Excedido</span>
+                <span className="text-[10px] text-muted-foreground">&gt; 13h Excedido*</span>
               </div>
             </div>
           ) : (
-            /* Referência para 2 motoristas (equipa) */
+            /* Referência para 2 motoristas (equipa): limite 30h com 9h descanso cada */
             <div className="grid grid-cols-2 gap-1.5">
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
@@ -316,17 +325,22 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                <span className="text-[10px] text-muted-foreground">15–18h Atenção</span>
+                <span className="text-[10px] text-muted-foreground">15–21h Atenção</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-orange-500" />
-                <span className="text-[10px] text-muted-foreground">18–21h Crítico</span>
+                <span className="text-[10px] text-muted-foreground">21–27h Crítico</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                <span className="text-[10px] text-muted-foreground">&gt; 21h Excedido</span>
+                <span className="text-[10px] text-muted-foreground">&gt; 27h Verificar (máx. 30h)</span>
               </div>
             </div>
+          )}
+          {!isTeam && (
+            <p className="text-[9px] text-muted-foreground leading-relaxed mt-1.5">
+              * Acima de 13h só é permitido como exceção (até 15h), no máximo 3 vezes por semana — Reg. CE 561/2006 / Diretiva 2002/15/CE.
+            </p>
           )}
         </div>
 

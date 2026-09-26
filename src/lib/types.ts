@@ -39,6 +39,9 @@ export interface WorkDay {
   numDrivers: number;
   timezone?: string | null;
   utcOffset?: string | null;
+  breakStart?: string | null;
+  breakType?: 'continuous' | 'split' | null;
+  breakMinutes?: number;
   events: WorkDayEvent[];
   drivingSessions?: DrivingSession[];
   // Campos calculados devolvidos pela API

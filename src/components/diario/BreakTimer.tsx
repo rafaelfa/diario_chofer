@@ -16,8 +16,8 @@ interface BreakTimerProps {
 }
 
 const CONTINUOUS_SECONDS = 45 * 60; // 45 minutos
-const SPLIT_PHASE1_SECONDS = 30 * 60; // 30 minutos
-const SPLIT_PHASE2_SECONDS = 15 * 60; // 15 minutos
+const SPLIT_PHASE1_SECONDS = 15 * 60; // 1ª pausa: 15 minutos
+const SPLIT_PHASE2_SECONDS = 30 * 60; // 2ª pausa: 30 minutos
 
 export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onResume }: BreakTimerProps) {
   const [remaining, setRemaining] = useState(0);
@@ -128,7 +128,7 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
               className="w-full h-12 sm:h-14 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700 text-base font-bold"
             >
               <Timer className="h-5 w-5 mr-2" />
-              Dividir: 30min + 15min
+              Dividir: 15min + 30min
             </Button>
           </div>
         </div>
@@ -161,16 +161,16 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
                 ? (remaining > 0 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 line-through')
                 : (remaining > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 line-through')
             }`}>
-              1ª Pausa: 30min
+              1ª Pausa: 15min
             </span>
             {phase === 2 && remaining > 0 && (
               <span className="text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                2ª Pausa: 15min
+                2ª Pausa: 30min
               </span>
             )}
             {phase === 2 && remaining <= 0 && (
               <span className="text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                2ª Pausa: 15min ✓
+                2ª Pausa: 30min ✓
               </span>
             )}
           </div>

@@ -4,7 +4,7 @@
  */
 
 /** Regex para validar matrícula no formato AA-00-BB */
-export const MATRICULA_REGEX = /^[A-Z]{2}-\d{2}-[A-Z0-9]{2}$/;
+export const MATRICULA_REGEX = /^[A-Z]{2}-[0-9]{1}[A-Z0-9]-[A-Z0-9]{2}$/;
 
 /**
  * Valida se uma matrícula está no formato correto (AA-00-BB).

@@ -172,6 +172,25 @@ export function useWorkDays() {
     [currentDay]
   );
 
+  /** Persiste o estado da pausa no banco (fire-and-forget com retry único) */
+  const saveBreakState = useCallback(
+    async (dayId: string, payload: { breakStart: string | null; breakType: string | null; breakMinutes: number }): Promise<void> => {
+      const send = () =>
+        fetch(`/api/workdays/${dayId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      try {
+        const res = await send();
+        if (!res.ok) await send(); // retry único
+      } catch {
+        try { await send(); } catch { /* offline — será re-sincronizado na próxima ação */ }
+      }
+    },
+    []
+  );
+
   /** Adiciona um evento ao dia em curso */
   const addEvent = useCallback(
     async (workDayId: string, time: string, description: string): Promise<void> => {

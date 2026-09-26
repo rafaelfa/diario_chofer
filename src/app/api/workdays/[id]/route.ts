@@ -111,6 +111,15 @@ export async function PUT(
     if (body.truckCheck !== undefined) dataToUpdate.truckCheck = Boolean(body.truckCheck);
     if (body.observations !== undefined) dataToUpdate.observations = body.observations || null;
     if (body.matricula !== undefined) dataToUpdate.matricula = body.matricula ? body.matricula.toUpperCase() : null;
+     // Estado da pausa (persistência — sobrevive a refresh/fecho do app)
+    if (body.breakStart !== undefined) {
+      dataToUpdate.breakStart = body.breakStart ? new Date(body.breakStart) : null;
+    }
+    if (body.breakType !== undefined) dataToUpdate.breakType = body.breakType || null;
+    if (body.breakMinutes !== undefined) {
+      const bm = parseInt(String(body.breakMinutes), 10);
+      dataToUpdate.breakMinutes = isNaN(bm) || bm < 0 ? 0 : bm;
+    }
 
     log('Dados a atualizar:', JSON.stringify(dataToUpdate, null, 2));
 

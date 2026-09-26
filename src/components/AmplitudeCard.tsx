@@ -3,26 +3,10 @@
 /**
  * AmplitudeCard — Exibe a amplitude do dia (Reg. CE 561/2006, Art. 8º)
  *
- * Amplitude = tempo entre o início e o fim do período de trabalho diário,
- * incluindo condução, pausas e outros períodos de trabalho.
- *
- * Limites UE (Reg. CE 561/2006, Art. 6º e 8º + Diretiva 2002/15/CE):
- *   1 Motorista:
- *     Normal: 13h (amplitude diária padrão)
- *     Excecional: 15h (máximo permitido, até 3x por semana; total semanal de
- *     amplitudes não pode ultrapassar 65h em 2 semanas — Diretiva 2002/15/CE)
- *
- *   2 Motoristas (equipa):
- *     A amplitude da equipa pode estender-se até 30h, desde que cada motorista
- *     faça no mínimo 9h de descanso dentro desse período de 30h
- *     (Reg. CE 561/2006, Art. 8º, nº 8). Condução individual continua limitada
- *     a 9h/dia (10h, 2x/semana).
- *
  * Cores (1 motorista):
- *   🟢 Verde:    < 11h   — confortável
+ *   🟢 Verde:    < 13h   — Normal
  *   🟡 Amarelo:  11h-12.5h — atenção
- *   🟠 Laranja:  12.5h-13h — próximo do limite normal
- *   🔴 Vermelho: > 13h   — excede o limite normal (só permitido como exceção até 15h, máx. 3x/semana)
+ *   🔴 Vermelho: > 13h   — excede o limite normal (só permitido como exceção até 15h, máx. 2x/semana)
  *
  * Cores (2 motoristas):
  *   🟢 Verde:    < 15h   — confortável
@@ -38,9 +22,7 @@ import { parseTimeToMinutes, diffInMinutes, minutesToFormatted } from '@/lib/tim
 interface AmplitudeCardProps {
   startTime: string | null;
   endTime: string | null | undefined;
-  /** Força a hora "agora" (para testes) */
   nowOverride?: Date;
-  /** Número de motoristas (1 = solo, 2 = equipa) */
   numDrivers?: number;
 }
 
@@ -95,19 +77,12 @@ const AMPLITUDE_CONFIGS: Record<AmplitudeLevel, AmplitudeConfig> = {
   },
 };
 
-/**
- * Limites de amplitude conforme Reg. CE 561/2006 + Diretiva 2002/15/CE
- *
- * 1 motorista: normal 13h, excecional até 15h (máx. 3x/semana)
- * 2 motoristas (equipa): até 30h, com mínimo de 9h de descanso para cada
- * motorista dentro do período de 30h (Art. 8º, nº 8)
- */
 interface AmplitudeLimits {
-  normal: number;      // Limite normal diário (13h solo)
-  attention1: number;  // Primeiro limiar de atenção
-  attention2: number;  // Segundo limiar (próximo do limite normal)
-  absolute: number;    // Limite absoluto (15h solo / 30h equipa)
-  label: string;       // Texto descritivo do limite
+  normal: number;
+  attention1: number;
+  attention2: number;
+  absolute: number;
+  label: string;
 }
 
 const AMPLITUDE_LIMITS: Record<number, AmplitudeLimits> = {
@@ -140,22 +115,19 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
   const isTeam = numDrivers === 2;
   const limits = AMPLITUDE_LIMITS[numDrivers] || AMPLITUDE_LIMITS[1];
 
-  // Sem startTime → sem amplitude
   if (!startTime) return null;
 
   const startMin = parseTimeToMinutes(startTime);
   if (startMin === null) return null;
 
-  // Calcular amplitude: startTime → endTime (ou agora)
   let amplitudeMinutes: number;
   if (endTime) {
     const diff = diffInMinutes(startTime, endTime);
     amplitudeMinutes = diff ?? 0;
   } else {
-    // Dia em andamento — amplitude cresce em tempo real
     const nowMin = now.getHours() * 60 + now.getMinutes();
     amplitudeMinutes = nowMin - startMin;
-    if (amplitudeMinutes < 0) amplitudeMinutes += 24 * 60; // passou meia-noite
+    if (amplitudeMinutes < 0) amplitudeMinutes += 24 * 60;
   }
 
   const amplitudeHours = amplitudeMinutes / 60;
@@ -163,9 +135,7 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
   const config = AMPLITUDE_CONFIGS[level];
   const formattedTime = minutesToFormatted(Math.max(0, Math.round(amplitudeMinutes)));
 
-  // Percentual em relação ao limite normal
   const percentage = Math.min((amplitudeHours / limits.normal) * 100, 100);
-
   const isPulsing = level === 'excedido' || level === 'proximo';
 
   return (
@@ -235,8 +205,13 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
           {/* Marcas de referência na barra */}
           <div className="relative h-0 mt-0.5">
             {!isTeam ? (
-              /* Referências para 1 motorista: 13h (normal) e 15h (excecional) — barra escala até 15h */
+              /* Referências para 1 motorista: 11h, 12.5h, 13h, 15h — barra escala até 15h */
               <>
+                {/* 11h = ~73% de 15h (atenção) */}
+                <div className="absolute flex flex-col items-center" style={{ left: '73%' }}>
+                  <div className="w-px h-1.5 bg-amber-400" />
+                  <span className="text-[8px] text-amber-600 dark:text-amber-400 -mt-0.5">11h</span>
+                </div>
                 {/* 12.5h = ~83% de 15h (crítico) */}
                 <div className="absolute flex flex-col items-center" style={{ left: '83%' }}>
                   <div className="w-px h-1.5 bg-orange-400" />
@@ -289,7 +264,7 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
               : isTeam && level === 'proximo'
               ? `Amplitude próxima de ${limits.normal}h — cada motorista deve ter mínimo 9h descanso em 30h`
               : !isTeam && level === 'excedido' && amplitudeHours <= limits.absolute
-              ? `Acima de 13h — permitido só como exceção (até 15h), máx. 3x/semana`
+              ? `Acima de 13h — permitido só como exceção (até 15h), máx. 2x/semana`
               : config.description}
           </p>
         </div>
@@ -297,7 +272,7 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
         {/* Tabela de referência rápida */}
         <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/10">
           {!isTeam ? (
-            /* Referência para 1 motorista: normal 13h, excecional até 15h */
+            /* Referência para 1 motorista: normal 13h, atenção 11–12.5h, excecional até 15h */
             <div className="grid grid-cols-2 gap-1.5">
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
@@ -339,7 +314,7 @@ export function AmplitudeCard({ startTime, endTime, nowOverride, numDrivers = 1 
           )}
           {!isTeam && (
             <p className="text-[9px] text-muted-foreground leading-relaxed mt-1.5">
-              * Acima de 13h só é permitido como exceção (até 15h), no máximo 3 vezes por semana — Reg. CE 561/2006 / Diretiva 2002/15/CE.
+              * Acima de 13h só é permitido como exceção (até 15h), no máximo 2 vezes por semana — Reg. CE 561/2006 / Diretiva 2002/15/CE.
             </p>
           )}
         </div>

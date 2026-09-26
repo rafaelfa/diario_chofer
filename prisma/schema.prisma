@@ -50,6 +50,9 @@ model WorkDay {
   utcOffset     String?          @map("utc_offset") // Offset UTC no início (ex: "+01:00" ou "+00:00")
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
+  breakStart    DateTime?        @map("break_start") // Início da pausa em curso (persistida — sobrevive a refresh)
+  breakType     String?          @map("break_type") // 'continuous' | 'split' | null
+  breakMinutes  Int              @default(0) @map("break_minutes") // Total de minutos de pausas concluídas no dia
 
   // Relacionamentos
   user             AppUser          @relation(fields: [userId], references: [id], onDelete: Cascade)

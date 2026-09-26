@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
 
 interface MatriculaPlateInputProps {
@@ -10,87 +10,106 @@ interface MatriculaPlateInputProps {
   onComplete?: () => void;
 }
 
+/** Mantém apenas letras e números, em maiúsculas. */
+function sanitize(raw: string): string {
+  return raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/** Converte o valor completo ("PT12AB" ou "PT-12-AB") nos 3 segmentos de até 2 chars. */
+function splitParts(value: string): [string, string, string] {
+  const clean = sanitize(value).slice(0, 6);
+  return [clean.slice(0, 2), clean.slice(2, 4), clean.slice(4, 6)];
+}
+
 /**
- * Input visual de matrícula europeia (AA-00-BB).
- * Extrai o componente que estava embutido em page.tsx.
- * Suporta auto-focus entre campos e callback onComplete.
+ * Input visual de matrícula em 3 quadros (ex: PT-12-AB).
+ *
+ * Cada quadro aceita QUALQUER combinação de letras e números — sem máscara
+ * por posição. O auto-avanço é feito na tecla digitada (rAF), nunca via
+ * useEffect, para não roubar o foco/teclado durante a digitação.
  */
 export function MatriculaPlateInput({ value, onChange, onComplete }: MatriculaPlateInputProps) {
-  const parts = value.split('-');
-  const part1 = parts[0] ?? '';
-  const part2 = parts[1] ?? '';
-  const part3 = parts[2] ?? '';
+  const [parts, setParts] = useState<[string, string, string]>(() => splitParts(value));
+  // Última string que NÓS enviamos ao pai. Serve para distinguir "mudança externa"
+  // (reset do form) de eco da nossa própria onChange — sem isso, um `value` do pai
+  // que normalize diferente causaria loop de re-sync e perda do caractere digitado.
+  const lastEmitted = useRef<string>(value);
 
-  const input2Ref = useRef<HTMLInputElement>(null);
-  const input3Ref = useRef<HTMLInputElement>(null);
-
-  const rebuild = (p1: string, p2: string, p3: string) =>
-    [p1, p2, p3].filter(Boolean).join('-');
-
-  // Quando part1 atinge 2 letras, avançar para part2
+  // Sincroniza com mudanças EXTERNAS (ex: reset do formulário após salvar).
   useEffect(() => {
-    if (part1.length === 2 && part2.length === 0) {
-      input2Ref.current?.focus();
-    }
-  }, [part1.length, part2.length]);
+    if (value === lastEmitted.current) return; // eco do nosso próprio commit → ignora
+    lastEmitted.current = value;
+    setParts(splitParts(value));
+  }, [value]);
 
-  // Quando part2 atinge 2 números, avançar para part3
-  useEffect(() => {
-    if (part2.length === 2 && part3.length === 0) {
-      input3Ref.current?.focus();
-    }
-  }, [part2.length, part3.length]);
+  const refs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)];
 
-  // Quando todos os 3 estão preenchidos, chamar onComplete
+  const commit = (next: [string, string, string]) => {
+    setParts(next);
+    const joined = next.join('');
+    const emitted = joined ? `${joined.slice(0, 2)}-${joined.slice(2, 4)}${joined.length > 4 ? `-${joined.slice(4, 6)}` : ''}` : '';
+    lastEmitted.current = emitted;
+    onChange(emitted);
+  };
+
+  /** Avança o foco ao completar um quadro (dispara na TECLA, não em re-render). */
+  const focusNext = (i: number) => {
+    requestAnimationFrame(() => refs[i + 1]?.current?.focus());
+  };
+
+  const handleChange = (i: number, raw: string) => {
+    const val = sanitize(raw).slice(0, 2);
+    const next: [string, string, string] = [...parts];
+    next[i] = val;
+    commit(next);
+    if (val.length === 2 && i < 2) focusNext(i);
+  };
+
+  // Quando todos os 3 quadros estão completos, avisa o pai (uma vez por valor completo).
+  // IMPORTANTE: usa ref para a callback — se `onComplete` ficasse nas dependências do
+  // efeito, cada tecla recriaria a closure no pai e dispararia foco em outro campo no
+  // meio da digitação (bug: "primeiro quadro não aceita número").
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const completeNotified = useRef(false);
   useEffect(() => {
-    if (part1.length === 2 && part2.length === 2 && part3.length === 2) {
-      onComplete?.();
+    const isComplete = parts.every((p) => p.length === 2);
+    if (isComplete && !completeNotified.current) {
+      completeNotified.current = true;
+      onCompleteRef.current?.();
+    } else if (!isComplete) {
+      completeNotified.current = false;
     }
-  }, [part1.length, part2.length, part3.length, onComplete]);
+  }, [parts]);
+
+  const boxClass =
+    'w-14 h-14 text-center text-xl font-bold uppercase bg-slate-100 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 focus-visible:border-blue-500 focus-visible:ring-blue-500/40';
 
   return (
     <div className="flex items-center justify-center gap-1">
-      {/* Parte 1: 2 letras */}
-      <Input
-        value={part1}
-        onChange={(e) => {
-          const val = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
-          onChange(rebuild(val, part2, part3));
-        }}
-        placeholder="PT"
-        maxLength={2}
-        className="w-14 h-14 text-center text-xl font-bold uppercase bg-blue-600 text-white border-blue-700 placeholder:text-blue-300"
-      />
-
-      <span className="text-2xl font-bold text-slate-400">-</span>
-
-      {/* Parte 2: 2 números */}
-      <Input
-        ref={input2Ref}
-        value={part2}
-        onChange={(e) => {
-          const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
-          onChange(rebuild(part1, val, part3));
-        }}
-        placeholder="12"
-        maxLength={2}
-        className="w-14 h-14 text-center text-xl font-bold bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600"
-      />
-
-      <span className="text-2xl font-bold text-slate-400">-</span>
-
-      {/* Parte 3: 2 letras/números */}
-      <Input
-        ref={input3Ref}
-        value={part3}
-        onChange={(e) => {
-          const val = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 2);
-          onChange(rebuild(part1, part2, val));
-        }}
-        placeholder="AB"
-        maxLength={2}
-        className="w-14 h-14 text-center text-xl font-bold uppercase bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600"
-      />
+      {parts.map((part, i) => (
+        <div key={i} className="contents">
+          {i > 0 && <span className="text-2xl font-bold text-slate-400">-</span>}
+          <Input
+            ref={refs[i]}
+            value={part}
+            onChange={(e) => handleChange(i, e.target.value)}
+            onKeyDown={(e) => {
+              // Backspace num quadro vazio volta para o anterior (UX de placa).
+              if (e.key === 'Backspace' && part === '' && i > 0) {
+                e.preventDefault();
+                refs[i - 1]?.current?.focus();
+              }
+            }}
+            placeholder={['AA', '00', 'BB'][i]}
+            maxLength={2}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            className={boxClass}
+          />
+        </div>
+      ))}
     </div>
   );
 }

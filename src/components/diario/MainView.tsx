@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useCallback, useEffect } from 'react';
-import { WeeklyRestAlert } from '@/components/diario/WeeklyRestAlert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -24,6 +23,7 @@ import { DayTimeline } from '@/components/diario/DayTimeline';
 import { TrafficLightStatus } from '@/components/diario/TrafficLightStatus';
 import { WeeklyBars } from '@/components/diario/WeeklyBars';
 import { BreakTimer } from '@/components/diario/BreakTimer';
+import { WeeklyRestAlert } from '@/components/diario/WeeklyRestAlert';
 import type {
   ConformityStatus,
   WorkingTimeResult,
@@ -36,6 +36,8 @@ import type {
 
 interface MainViewProps {
   currentDay: WorkDay | null;
+  /** Todos os dias de trabalho (para o alerta de descansos semanais de 11h) */
+  workDays?: WorkDay[];
   isLoading: boolean;
   weeklyReport: Report | null;
   conformity: ConformityStatus;
@@ -81,7 +83,7 @@ interface MainViewProps {
 }
 
 export function MainView({
-  currentDay, isLoading, weeklyReport, conformity, workingTime,
+  currentDay, workDays = [], isLoading, weeklyReport, conformity, workingTime,
   startForm, setStartForm,
   endForm, setEndForm,
   newEvent, setNewEvent,
@@ -132,7 +134,9 @@ export function MainView({
       {!currentDay ? (
         /* DIA NÃO INICIADO */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-4">
+            {/* Alerta: descansos semanais de 11h (Reg. CE 561/2006, Art. 8º nº 6) */}
+            <WeeklyRestAlert workDays={workDays} />
             <Card className="border-2 border-dashed border-slate-300 dark:border-slate-700 h-full">
               <CardContent className="pt-6">
                 <div className="text-center space-y-4">

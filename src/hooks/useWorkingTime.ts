@@ -53,6 +53,10 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
     let totalMinutes = 0;
 
     for (const session of sessions) {
+     // No modo 2 motoristas, as pausas/paradas da equipa NÃO contam como
+    // condução individual — somamos apenas sessões efetivamente conduzidas
+    // e nunca ultrapassamos o relógio (sessão ativa = agora - início).
+    for (const session of sessions) {
       const sessionStart = parseTimeToMinutes(session.startTime);
       if (sessionStart === null) continue;
 

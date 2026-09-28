@@ -103,7 +103,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     workDays, currentDay, isLoading,
     loadData: loadWorkDays,
     startDay, endDay, editDay, deleteDay, addEvent,
-    pauseDriving, resumeDriving,
+    pauseDriving, resumeDriving, saveBreakState,
   } = workDaysActions;
 
   const {

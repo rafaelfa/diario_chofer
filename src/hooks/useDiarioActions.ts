@@ -566,13 +566,30 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   // ═══════════════════════════════════════════════════════════════════════
 
   // Opens the break type selection screen
-  const handleOpenBreak = useCallback(() => {
-    setBreakState(prev => ({
-      ...prev,
-      isActive: true,
-      startTime: null,
-      type: 'none',
-    }));
+  // (#1) Restaurar pausa em curso vinda do banco ao carregar/atualizar o dia
+  useEffect(() => {
+    if (!currentDay) return;
+    if (currentDay.endTime) return;
+    const dbActive = !!currentDay.breakStart && !!currentDay.breakType;
+    if (dbActive) {
+      setBreakState(prev => {
+        if (prev.isActive && prev.startTime) return prev;
+        return { isActive: true, startTime: new Date(currentDay.breakStart as string), type: currentDay.breakType as 'continuous' | 'split', completedBreakMinutes: 0 };
+      });
+    } else if (!currentDay.breakStart) {
+      setBreakState(prev => (prev.isActive ? { ...prev, isActive: false, startTime: null, type: 'none' } : prev));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDay?.id, currentDay?.breakStart, currentDay?.breakType]);
+ const handleOpenBreak = useCallback(() => {
+    setBreakState(prev => {
+      if (prev.isActive && prev.startTime) {
+        showToast('Já existe uma pausa em curso. Use RETOMAR para finalizar.', 'warning');
+        return prev;
+      }
+      return { ...prev, isActive: true, startTime: null, type: 'none' };
+    });
+  }, [setBreakState, showToast]);
   }, [setBreakState]);
 
   // Confirms break type and starts the timer

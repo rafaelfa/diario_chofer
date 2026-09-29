@@ -1,9 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { calcHoursWorked, calcKmTraveled } from '@/lib/time';
+import { Prisma } from '@prisma/client';
+import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
 import { requireAuth } from '@/lib/auth';
 import { formatDatePtServer } from '@/lib/timezone';
+import { escapeHtml } from '@/lib/html';
+import { endOfUtcDay, isValidTimezone, parseDateOnlyUtc, startOfUtcDay, validateMatricula } from '@/lib/validators';
+
+type VehicleReportWorkDay = Prisma.WorkDayGetPayload<{
+  include: { events: true; drivingSessions: true };
+}>;
+
+interface VehicleReportHtmlData {
+  matricula: string;
+  periodLabel: string;
+  startDate: Date | null;
+  endDate: Date | null;
+  timezone: string | null;
+  statistics: {
+    diasTrabalhados: number;
+    totalKm: number;
+    totalHours: number;
+    totalEvents: number;
+    avgHoursPerDay: number;
+    avgKmPerDay: number;
+    kmInicial: number | null;
+    kmFinal: number | null;
+    paises: string[];
+  };
+  days: Array<{
+    dateFormatted: string;
+    startTime: string;
+    endTime: string;
+    startKm: number | string;
+    endKm: number | string;
+    kmTraveled: number;
+    hours: number;
+    startCountry: string;
+    endCountry: string;
+    events: number;
+    truckCheck: string;
+    turnosCount: number;
+    turnos: Array<{
+      numero: number;
+      startTime: string;
+      endTime: string;
+      startKm: string;
+      endKm: string;
+      km: number;
+      status: string;
+    }>;
+  }>;
+}
 
 // GET - PDF/HTML para relatório de veículo
 // Quando matrícula é fornecida, busca TODOS os registros do veículo (sem filtro de data)
@@ -23,18 +72,28 @@ export async function GET(request: NextRequest) {
     if (!matricula) {
       return NextResponse.json({ error: 'Matrícula é obrigatória' }, { status: 400 });
     }
+    const normalizedMatricula = validateMatricula(matricula);
+    if (!normalizedMatricula.valid || !isValidTimezone(timezone)) {
+      return NextResponse.json({ error: 'Matrícula ou fuso horário inválido' }, { status: 400 });
+    }
+    if (Boolean(customStartDate) !== Boolean(customEndDate)) {
+      return NextResponse.json({ error: 'Informe as datas inicial e final do período' }, { status: 400 });
+    }
 
     let startDate: Date | null = null;
     let endDate: Date | null = null;
     let periodLabel: string;
-    let historico: any[] = [];
+    let historico: VehicleReportWorkDay[] = [];
 
     // Se tem datas personalizadas, usar período específico
     if (customStartDate && customEndDate) {
-      startDate = new Date(customStartDate);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(customEndDate);
-      endDate.setHours(23, 59, 59, 999);
+      startDate = parseDateOnlyUtc(customStartDate);
+      const parsedEndDate = parseDateOnlyUtc(customEndDate);
+      if (!startDate || !parsedEndDate || startDate > parsedEndDate) {
+        return NextResponse.json({ error: 'Período personalizado inválido' }, { status: 400 });
+      }
+      endDate = new Date(parsedEndDate);
+      endDate.setUTCHours(23, 59, 59, 999);
       
       periodLabel = `Período: ${formatDatePtServer(startDate, timezone)} a ${formatDatePtServer(endDate, timezone)}`;
       
@@ -42,16 +101,13 @@ export async function GET(request: NextRequest) {
       historico = await db.workDay.findMany({
         where: {
           userId,
-          matricula: matricula.toUpperCase(),
-          OR: [
-            { date: { gte: startDate, lte: endDate } },
-            { date: null }
-          ]
+          matricula: normalizedMatricula.normalized,
+          date: { gte: startDate, lte: endDate },
         },
         include: {
           events: true,
           drivingSessions: {
-            orderBy: { startTime: 'asc' }
+            orderBy: { createdAt: 'asc' }
           }
         },
         orderBy: { createdAt: 'asc' }
@@ -61,12 +117,12 @@ export async function GET(request: NextRequest) {
       historico = await db.workDay.findMany({
         where: {
           userId,
-          matricula: matricula.toUpperCase()
+          matricula: normalizedMatricula.normalized
         },
         include: {
           events: true,
           drivingSessions: {
-            orderBy: { startTime: 'asc' }
+            orderBy: { createdAt: 'asc' }
           }
         },
         orderBy: { createdAt: 'asc' }
@@ -82,26 +138,20 @@ export async function GET(request: NextRequest) {
           .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
         if (validDates.length > 0) {
-          startDate = new Date(validDates[0]);
-          startDate.setHours(0, 0, 0, 0);
-          endDate = new Date(validDates[validDates.length - 1]);
-          endDate.setHours(23, 59, 59, 999);
+          startDate = startOfUtcDay(validDates[0]);
+          endDate = endOfUtcDay(validDates[validDates.length - 1]);
         } else {
           // Usar createdAt se não há datas válidas
           const createdDates = historico.map(r => r.createdAt).sort();
-          startDate = new Date(createdDates[0]);
-          startDate.setHours(0, 0, 0, 0);
-          endDate = new Date(createdDates[createdDates.length - 1]);
-          endDate.setHours(23, 59, 59, 999);
+          startDate = startOfUtcDay(createdDates[0]);
+          endDate = endOfUtcDay(createdDates[createdDates.length - 1]);
         }
         
         periodLabel = `Todos os registros de ${formatDatePtServer(startDate, timezone)} a ${formatDatePtServer(endDate, timezone)}`;
       } else {
         // Veículo sem registros
-        startDate = new Date();
-        startDate.setHours(0, 0, 0, 0);
-        endDate = new Date();
-        endDate.setHours(23, 59, 59, 999);
+        startDate = startOfUtcDay(new Date());
+        endDate = endOfUtcDay(new Date());
         periodLabel = 'Veículo sem registros';
       }
     }
@@ -120,17 +170,14 @@ export async function GET(request: NextRequest) {
       totalKm += dayKm;
 
       // Registrar KM inicial e final do período
-      if (kmInicial === null && day.startKm) {
+      if (kmInicial === null && day.startKm != null) {
         kmInicial = day.startKm;
       }
-      if (day.endKm) {
+      if (day.endKm != null) {
         kmFinal = day.endKm;
       }
 
-      // Horas — centralizado em calcHoursWorked
-      // Proteção dupla: limitar a 15h por dia
-      const rawDayHours = calcHoursWorked(day.drivingSessions || [], day.startTime, day.endTime) || 0;
-      const dayHours = Math.min(rawDayHours, 15);
+      const dayHours = calcWorkDayHours(day, new Date(), null) ?? 0;
       totalHours += dayHours;
 
       totalEvents += day.events.length;
@@ -140,13 +187,13 @@ export async function GET(request: NextRequest) {
       if (day.endCountry) paises.add(day.endCountry);
 
       // Formatar turnos
-      const turnos = (day.drivingSessions || []).map((session: any, index: number) => ({
+      const turnos = day.drivingSessions.map((session, index) => ({
         numero: index + 1,
         startTime: session.startTime || '--:--',
         endTime: session.endTime || '--:--',
         startKm: session.startKm?.toLocaleString() || '--',
         endKm: session.endKm?.toLocaleString() || '--',
-        km: session.startKm && session.endKm ? session.endKm - session.startKm : 0,
+        km: session.startKm != null && session.endKm != null ? session.endKm - session.startKm : 0,
         status: session.status
       }));
 
@@ -155,8 +202,8 @@ export async function GET(request: NextRequest) {
         dateFormatted: day.date ? formatDatePtServer(day.date, timezone) : 'Sem data',
         startTime: day.startTime || '-',
         endTime: day.endTime || '-',
-        startKm: day.startKm || '-',
-        endKm: day.endKm || '-',
+        startKm: day.startKm ?? '-',
+        endKm: day.endKm ?? '-',
         kmTraveled: dayKm,
         hours: parseFloat(dayHours.toFixed(1)),
         startCountry: day.startCountry || '-',
@@ -169,19 +216,20 @@ export async function GET(request: NextRequest) {
     });
 
     // Retornar HTML diretamente para abrir no navegador
+    const daysWorked = new Set(historico.map(day => (day.date ?? day.createdAt).toISOString().slice(0, 10))).size;
     const html = generateVehicleReportHTML({
-      matricula: matricula.toUpperCase(),
+      matricula: normalizedMatricula.normalized,
       periodLabel,
       startDate,
       endDate,
       timezone,  // Passar timezone para formatação no HTML
       statistics: {
-        diasTrabalhados: historico.length,
+        diasTrabalhados: daysWorked,
         totalKm,
         totalHours: parseFloat(totalHours.toFixed(1)),
         totalEvents,
-        avgHoursPerDay: historico.length > 0 ? parseFloat((totalHours / historico.length).toFixed(1)) : 0,
-        avgKmPerDay: historico.length > 0 ? Math.round(totalKm / historico.length) : 0,
+        avgHoursPerDay: daysWorked > 0 ? parseFloat((totalHours / daysWorked).toFixed(1)) : 0,
+        avgKmPerDay: daysWorked > 0 ? Math.round(totalKm / daysWorked) : 0,
         kmInicial,
         kmFinal,
         paises: Array.from(paises)
@@ -202,7 +250,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-function generateVehicleReportHTML(data: any): string {
+function generateVehicleReportHTML(data: VehicleReportHtmlData): string {
   const { matricula, periodLabel, startDate, endDate, statistics, days, timezone } = data;
 
   return `<!DOCTYPE html>
@@ -210,7 +258,7 @@ function generateVehicleReportHTML(data: any): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Relatório do Veículo - ${matricula}</title>
+  <title>Relatório do Veículo - ${escapeHtml(matricula)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 
@@ -497,11 +545,11 @@ function generateVehicleReportHTML(data: any): string {
   <div class="vehicle-header">
     <div>
       <p style="margin: 0; opacity: 0.8; font-size: 11px;">Matrícula</p>
-      <div class="vehicle-plate">${matricula}</div>
+      <div class="vehicle-plate">${escapeHtml(matricula)}</div>
     </div>
     <div style="text-align: right;">
       <p style="margin: 0; opacity: 0.8; font-size: 11px;">Período</p>
-      <p style="margin: 0; font-size: 14px; font-weight: bold;">${periodLabel}</p>
+      <p style="margin: 0; font-size: 14px; font-weight: bold;">${escapeHtml(periodLabel)}</p>
       ${startDate && endDate ? `<p style="margin: 0; font-size: 10px; opacity: 0.8;">${formatDatePtServer(startDate, timezone)} a ${formatDatePtServer(endDate, timezone)}</p>` : ''}
     </div>
   </div>
@@ -542,7 +590,7 @@ function generateVehicleReportHTML(data: any): string {
   <div class="paises-section">
     <div class="paises-title">🌍 Países Percorridos</div>
     <div class="paises-list">
-      ${statistics.paises.map((p: string) => `<span class="pais-badge">${p}</span>`).join('')}
+      ${statistics.paises.map((p: string) => `<span class="pais-badge">${escapeHtml(p)}</span>`).join('')}
     </div>
   </div>
   ` : ''}
@@ -553,7 +601,7 @@ function generateVehicleReportHTML(data: any): string {
   <p style="text-align: center; color: #64748b; padding: 20px;">
     Nenhum registro encontrado para este veículo.
   </p>
-  ` : days.map((d: any) => `
+  ` : days.map((d) => `
   <div class="day-section">
     <div class="day-header">
       <h3>📅 ${d.dateFormatted}</h3>
@@ -563,13 +611,13 @@ function generateVehicleReportHTML(data: any): string {
     <div class="day-info">
       <div class="day-info-item">
         <div class="label">Início</div>
-        <div class="value">${d.startTime}</div>
-        <div class="label">${d.startCountry}</div>
+        <div class="value">${escapeHtml(d.startTime)}</div>
+        <div class="label">${escapeHtml(d.startCountry)}</div>
       </div>
       <div class="day-info-item">
         <div class="label">Fim</div>
-        <div class="value">${d.endTime}</div>
-        <div class="label">${d.endCountry}</div>
+        <div class="value">${escapeHtml(d.endTime)}</div>
+        <div class="label">${escapeHtml(d.endCountry)}</div>
       </div>
       <div class="day-info-item">
         <div class="label">KM Início</div>
@@ -601,11 +649,11 @@ function generateVehicleReportHTML(data: any): string {
           </tr>
         </thead>
         <tbody>
-          ${d.turnos.map((t: any) => `
+          ${d.turnos.map((t) => `
           <tr>
             <td><strong>${t.numero}</strong></td>
-            <td>${t.startTime}</td>
-            <td>${t.endTime}</td>
+            <td>${escapeHtml(t.startTime)}</td>
+            <td>${escapeHtml(t.endTime)}</td>
             <td>${t.startKm}</td>
             <td>${t.endKm}</td>
             <td><strong>${t.km} km</strong></td>

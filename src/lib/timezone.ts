@@ -84,7 +84,8 @@ export function toLocalISOString(date: Date = new Date()): string {
  */
 export function formatDatePt(dateStr: string, options?: Intl.DateTimeFormatOptions): string {
   if (!dateStr) return '';
-  const date = new Date(dateStr);
+  const isCivilDate = /^\d{4}-\d{2}-\d{2}(?:T00:00:00(?:\.000)?Z)?$/.test(dateStr);
+  const date = new Date(isCivilDate ? `${dateStr.slice(0, 10)}T00:00:00.000Z` : dateStr);
   if (isNaN(date.getTime())) return dateStr;
 
   const defaultOptions: Intl.DateTimeFormatOptions = {
@@ -93,7 +94,10 @@ export function formatDatePt(dateStr: string, options?: Intl.DateTimeFormatOptio
     month: '2-digit',
   };
 
-  return date.toLocaleDateString('pt-PT', options || defaultOptions);
+  return date.toLocaleDateString('pt-PT', {
+    ...(options || defaultOptions),
+    ...(isCivilDate ? { timeZone: 'UTC' } : {}),
+  });
 }
 
 /**
@@ -109,6 +113,8 @@ export function formatDatePtServer(
 
   const d = typeof date === 'string' ? new Date(date) : date;
   if (isNaN(d.getTime())) return '';
+  const isUtcDayBoundary = (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0)
+    || (d.getUTCHours() === 23 && d.getUTCMinutes() === 59 && d.getUTCSeconds() === 59 && d.getUTCMilliseconds() === 999);
 
   const defaultOptions: Intl.DateTimeFormatOptions = {
     weekday: 'short',
@@ -119,8 +125,8 @@ export function formatDatePtServer(
   const formatOptions = options || defaultOptions;
 
   // Se temos timezone, forçar formatação nesse fuso
-  if (timezone) {
-    return d.toLocaleDateString('pt-PT', { ...formatOptions, timeZone: timezone });
+  if (timezone || isUtcDayBoundary) {
+    return d.toLocaleDateString('pt-PT', { ...formatOptions, timeZone: isUtcDayBoundary ? 'UTC' : timezone! });
   }
 
   return d.toLocaleDateString('pt-PT', formatOptions);

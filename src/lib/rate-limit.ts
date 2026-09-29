@@ -1,49 +1,15 @@
-/**
- * Rate Limiting para proteção contra brute force
- *
- * NOTA: Esta implementação usa um Map em memória.
- * No Vercel serverless, isso NÃO persiste entre invocações frias.
- *
- * Para produção com múltiplos usuários, considere usar:
- * - Upstash Redis (https://upstash.com) - gratuito até 10k req/dia
- * - Vercel Edge Config
- * - Database-backed rate limiting
- *
- * Para uso pessoal (um único usuário), esta implementação é suficiente.
- */
-
-/**
- * PRODUCTION UPGRADE PATH:
- * ------------------------
- * For production deployments with multiple concurrent users, replace the in-memory
- * Map with a distributed rate limiting solution. Recommended options:
- *
- * 1. Upstash Redis (free tier: 10k req/day):
- *    npm install @upstash/redis
- *    import { Redis } from '@upstash/redis'
- *    const redis = new Redis({ url: process.env.UPSTASH_REDIS_REST_URL!, token: process.env.UPSTASH_REDIS_REST_TOKEN! })
- *
- * 2. Vercel Edge Config:
- *    Use @vercel/edge-config for lightweight rate limiting at the edge.
- *
- * 3. Database-backed:
- *    Store rate limit entries in the PostgreSQL database with TTL.
- *    CREATE TABLE rate_limits (id TEXT PRIMARY KEY, count INT, reset_time TIMESTAMPTZ);
- *
- * Until then, the in-memory approach works for single-user deployments.
- */
-
-interface RateLimitEntry {
-  count: number;
-  resetTime: number;
-}
-
-// Store em memória (não persiste em serverless entre invocações frias)
-const rateLimitStore = new Map<string, RateLimitEntry>();
+import { db } from '@/lib/db';
 
 // Configuração padrão
 const DEFAULT_MAX_ATTEMPTS = 5;     // Máximo de tentativas
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000; // Janela de 15 minutos
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+let lastCleanup = 0;
+
+export const AUTH_RATE_LIMITS = {
+  login: { maxAttempts: DEFAULT_MAX_ATTEMPTS, windowMs: DEFAULT_WINDOW_MS },
+  register: { maxAttempts: 3, windowMs: 60 * 60 * 1000 },
+} as const;
 
 /**
  * Verifica se um IP excedeu o limite de tentativas
@@ -52,54 +18,48 @@ const DEFAULT_WINDOW_MS = 15 * 60 * 1000; // Janela de 15 minutos
  * @param windowMs - Janela de tempo em milissegundos
  * @returns Objeto com resultado e informações do rate limit
  */
-export function checkRateLimit(
+export async function checkRateLimit(
   identifier: string,
   maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
   windowMs: number = DEFAULT_WINDOW_MS
-): {
+): Promise<{
   success: boolean;
   remaining: number;
   resetTime: number;
   retryAfter: number;
-} {
+}> {
   const now = Date.now();
-  const entry = rateLimitStore.get(identifier);
+  const entries = await db.$queryRaw<Array<{ count: number; reset_at: Date }>>`
+    INSERT INTO "rate_limits" ("identifier", "count", "reset_at", "updated_at")
+    VALUES (${identifier}, 1, CURRENT_TIMESTAMP + (${windowMs} * INTERVAL '1 millisecond'), CURRENT_TIMESTAMP)
+    ON CONFLICT ("identifier") DO UPDATE SET
+      "count" = CASE
+        WHEN "rate_limits"."reset_at" <= CURRENT_TIMESTAMP THEN 1
+        WHEN "rate_limits"."count" > ${maxAttempts} THEN "rate_limits"."count"
+        ELSE "rate_limits"."count" + 1
+      END,
+      "reset_at" = CASE
+        WHEN "rate_limits"."reset_at" <= CURRENT_TIMESTAMP
+          THEN CURRENT_TIMESTAMP + (${windowMs} * INTERVAL '1 millisecond')
+        ELSE "rate_limits"."reset_at"
+      END,
+      "updated_at" = CURRENT_TIMESTAMP
+    RETURNING "count", "reset_at"
+  `;
 
-  // Se não existe entrada ou já expirou, criar nova
-  if (!entry || now > entry.resetTime) {
-    const newEntry: RateLimitEntry = {
-      count: 1,
-      resetTime: now + windowMs
-    };
-    rateLimitStore.set(identifier, newEntry);
-
-    return {
-      success: true,
-      remaining: maxAttempts - 1,
-      resetTime: newEntry.resetTime,
-      retryAfter: 0
-    };
+  if (now - lastCleanup >= CLEANUP_INTERVAL_MS) {
+    lastCleanup = now;
+    void db.rateLimit.deleteMany({ where: { resetAt: { lt: new Date(now - 24 * 60 * 60 * 1000) } } }).catch(() => undefined);
   }
 
-  // Verificar se excedeu o limite
-  if (entry.count >= maxAttempts) {
-    return {
-      success: false,
-      remaining: 0,
-      resetTime: entry.resetTime,
-      retryAfter: Math.ceil((entry.resetTime - now) / 1000) // segundos
-    };
-  }
-
-  // Incrementar contador
-  entry.count++;
-  rateLimitStore.set(identifier, entry);
-
+  const entry = entries[0];
+  const resetTime = new Date(entry.reset_at).getTime();
+  const success = entry.count <= maxAttempts;
   return {
-    success: true,
-    remaining: maxAttempts - entry.count,
-    resetTime: entry.resetTime,
-    retryAfter: 0
+    success,
+    remaining: Math.max(0, maxAttempts - entry.count),
+    resetTime,
+    retryAfter: success ? 0 : Math.max(1, Math.ceil((resetTime - now) / 1000)),
   };
 }
 
@@ -107,8 +67,8 @@ export function checkRateLimit(
  * Reseta o contador de rate limit para um identificador
  * Usado após login bem-sucedido
  */
-export function resetRateLimit(identifier: string): void {
-  rateLimitStore.delete(identifier);
+export async function resetRateLimit(identifier: string): Promise<void> {
+  await db.rateLimit.deleteMany({ where: { identifier } });
 }
 
 /**
@@ -117,35 +77,14 @@ export function resetRateLimit(identifier: string): void {
  */
 export function getClientIp(request: Request): string {
   // Vercel headers
-  const xForwardedFor = request.headers.get('x-forwarded-for');
-  if (xForwardedFor) {
-    // Pode conter múltiplos IPs, pegar o primeiro
-    return xForwardedFor.split(',')[0].trim();
-  }
-
-  // Outros headers comuns
   const xRealIp = request.headers.get('x-real-ip');
   if (xRealIp) {
     return xRealIp;
   }
 
+  const xForwardedFor = request.headers.get('x-forwarded-for');
+  if (xForwardedFor) return xForwardedFor.split(',')[0].trim();
+
   // Fallback para desenvolvimento local
   return 'unknown';
-}
-
-/**
- * Limpa entradas expiradas do store (executar periodicamente)
- */
-export function cleanupExpiredEntries(): void {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitStore.entries()) {
-    if (now > entry.resetTime) {
-      rateLimitStore.delete(key);
-    }
-  }
-}
-
-// Executar limpeza a cada 5 minutos
-if (typeof setInterval !== 'undefined') {
-  setInterval(cleanupExpiredEntries, 5 * 60 * 1000);
 }

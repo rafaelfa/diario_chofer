@@ -38,7 +38,6 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
   // Cronômetro principal
   useEffect(() => {
     if (!breakStartTime) {
-      setRemaining(0);
       return;
     }
 

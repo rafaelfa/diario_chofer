@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { requireAuth } from '@/lib/auth';
-import { calcHoursWorked, calcKmTraveled } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
-import { validateMatricula } from '@/lib/validators';
+import { isValidTimeString, parseDateOnlyUtc, parseNonNegativeInteger, validateMatricula } from '@/lib/validators';
 
 // GET — Listar todos os dias de trabalho do utilizador autenticado
 export async function GET(request: NextRequest) {
@@ -18,16 +18,20 @@ export async function GET(request: NextRequest) {
     const where: Prisma.WorkDayWhereInput = { userId };
 
     if (from || to) {
-      where.date = {};
-      if (from) where.date.gte = new Date(from);
-      if (to)   where.date.lte = new Date(to);
+      const fromDate = from ? parseDateOnlyUtc(from) : null;
+      const toDate = to ? parseDateOnlyUtc(to) : null;
+      if ((from && !fromDate) || (to && !toDate) || (fromDate && toDate && fromDate > toDate)) {
+        return NextResponse.json({ error: 'Intervalo de datas inválido' }, { status: 400 });
+      }
+      if (toDate) toDate.setUTCHours(23, 59, 59, 999);
+      where.date = { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) };
     }
 
     const workDays = await db.workDay.findMany({
       where,
       include: {
         events:          { orderBy: { time: 'asc' } },
-        drivingSessions: { orderBy: { startTime: 'asc' } },
+        drivingSessions: { orderBy: { createdAt: 'asc' } },
       },
       orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
     });
@@ -36,7 +40,7 @@ export async function GET(request: NextRequest) {
       const sessions = day.drivingSessions ?? [];
 
       const kmTraveled  = calcKmTraveled(sessions, day.startKm, day.endKm);
-      const hoursWorked = calcHoursWorked(sessions, day.startTime, day.endTime);
+      const hoursWorked = calcWorkDayHours(day);
 
       const lastSession   = sessions.at(-1);
       const lastSessionKm = lastSession?.endKm ?? lastSession?.startKm ?? null;
@@ -69,9 +73,20 @@ export async function POST(request: NextRequest) {
 
     log('POST /api/workdays — body recebido');  // sem dados sensíveis em prod
 
-    const { date, startTime, startCountry, startKm, lastRest, truckCheck, matricula, numDrivers, timezone, utcOffset } = body;
+    const { date, startTime, startCountry, startKm, lastRest, truckCheck, matricula, numDrivers, primaryDriverNumber, timezone, utcOffset } = body;
+
+    if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return NextResponse.json({ error: 'Data inválida' }, { status: 400 });
+    }
+    const workDate = new Date(`${date}T00:00:00.000Z`);
+    if (Number.isNaN(workDate.getTime()) || workDate.toISOString().slice(0, 10) !== date) {
+      return NextResponse.json({ error: 'Data inválida' }, { status: 400 });
+    }
 
     // Validar formato da matrícula (AA-00-BB)
+    if (matricula && typeof matricula !== 'string') {
+      return NextResponse.json({ error: 'Matrícula inválida' }, { status: 400 });
+    }
     if (matricula) {
       const { valid } = validateMatricula(matricula);
       if (!valid) {
@@ -82,7 +97,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const kmValue = startKm ? parseInt(String(startKm), 10) : null;
+    const parsedStartKm = parseNonNegativeInteger(startKm);
+    if (!parsedStartKm.valid) {
+      return NextResponse.json({ error: 'KM inicial deve ser um inteiro não negativo' }, { status: 400 });
+    }
+    const kmValue = parsedStartKm.value;
 
     // Validar KM contra último registo do utilizador para o mesmo veículo
     if (matricula && kmValue !== null) {
@@ -96,7 +115,7 @@ export async function POST(request: NextRequest) {
         select: { endKm: true },
       });
 
-      if (lastRecord?.endKm && kmValue < lastRecord.endKm) {
+      if (lastRecord?.endKm != null && kmValue != null && kmValue < lastRecord.endKm) {
         return NextResponse.json(
           {
             error: `KM inicial (${kmValue}) não pode ser menor que o KM final do último registo deste caminhão (${lastRecord.endKm})`,
@@ -106,53 +125,58 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const workDate = new Date(date);
-    workDate.setHours(0, 0, 0, 0);
-
-    // ⚠️ O cliente DEVE enviar startTime (hora local do browser).
-    // Se não foi enviado, é um bug do cliente — logar e rejeitar.
-    if (!startTime) {
+    if (!isValidTimeString(startTime)) {
       return NextResponse.json(
-        { error: 'startTime é obrigatório (hora local do dispositivo)' },
+        { error: 'startTime deve estar no formato HH:MM' },
         { status: 400 }
       );
     }
 
     const resolvedStartTime = startTime;
 
-    const workDay = await db.workDay.create({
-      data: {
-        userId,
-        date:         workDate,
-        startTime:    resolvedStartTime,
-        startCountry: startCountry || null,
-        startKm:      kmValue,
-        lastRest:     lastRest || null,
-        truckCheck:   Boolean(truckCheck),
-        matricula:    matricula ? matricula.toUpperCase() : null,
-        numDrivers:   numDrivers === 2 ? 2 : 1,
-        timezone:     timezone || null,
-        utcOffset:    utcOffset || null,
-        drivingSessions: {
-          create: {
-            userId,
-            startTime: resolvedStartTime,
-            startKm:   kmValue,
-            status:    'active',
-            utcOffset: utcOffset || null,
+    const workDay = await db.$transaction(async transaction => {
+      const openDay = await transaction.workDay.findFirst({ where: { userId, endTime: null }, select: { id: true } });
+      if (openDay) throw new Error('WORKDAY_ALREADY_OPEN');
+
+      return transaction.workDay.create({
+        data: {
+          userId,
+          date:         workDate,
+          startTime:    resolvedStartTime,
+          startCountry: typeof startCountry === 'string' ? startCountry.trim() || null : null,
+          startKm:      kmValue,
+          lastRest:     typeof lastRest === 'string' ? lastRest.trim() || null : null,
+          truckCheck:   truckCheck === true,
+          matricula:    matricula ? matricula.toUpperCase() : null,
+          numDrivers:   Number(numDrivers) === 2 ? 2 : 1,
+          primaryDriverNumber: Number(numDrivers) === 2 && Number(primaryDriverNumber) === 2 ? 2 : 1,
+          timezone:     typeof timezone === 'string' ? timezone : null,
+          utcOffset:    typeof utcOffset === 'string' ? utcOffset : null,
+          drivingSessions: {
+            create: {
+              userId,
+              startTime: resolvedStartTime,
+              startKm:   kmValue,
+              status:    'active',
+              driverNumber: Number(numDrivers) === 2 && Number(primaryDriverNumber) === 2 ? 2 : 1,
+              utcOffset: typeof utcOffset === 'string' ? utcOffset : null,
+            },
           },
         },
-      },
-      include: {
-        events:          true,
-        drivingSessions: true,
-      },
-    });
+        include: { events: true, drivingSessions: true },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     log('POST /api/workdays — criado id:', workDay.id);
 
     return NextResponse.json(workDay);
   } catch (error) {
+    if (error instanceof Error && error.message === 'WORKDAY_ALREADY_OPEN') {
+      return NextResponse.json({ error: 'Finalize a jornada aberta antes de iniciar outra' }, { status: 409 });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+      return NextResponse.json({ error: 'Outra jornada foi iniciada ao mesmo tempo. Atualize os dados.' }, { status: 409 });
+    }
     if (error instanceof Error && error.message.startsWith('UNAUTHORIZED')) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }

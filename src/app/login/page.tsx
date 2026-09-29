@@ -73,8 +73,8 @@ export default function LoginPage() {
       return;
     }
 
-    if (registerForm.password.length < 6) {
-      setError('A senha deve ter pelo menos 6 caracteres');
+    if (registerForm.password.length < 8 || new TextEncoder().encode(registerForm.password).length > 72) {
+      setError('A senha deve ter pelo menos 8 caracteres e no máximo 72 bytes');
       return;
     }
 
@@ -293,12 +293,13 @@ export default function LoginPage() {
                   <Input
                     id="register-password"
                     type="password"
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Mínimo 8 caracteres"
                     value={registerForm.password}
                     onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
                     className="pl-10"
                     required
-                    minLength={6}
+                    minLength={8}
+                    maxLength={72}
                   />
                 </div>
               </div>

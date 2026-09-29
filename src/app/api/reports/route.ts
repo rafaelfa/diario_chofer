@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { calcHoursWorked, calcKmTraveled, MAX_DAY_HOURS } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { logError } from '@/lib/logger';
 import { formatDatePtServer } from '@/lib/timezone';
+import {
+  aggregateDrivingByDate,
+  computeDrivingLimits,
+  evaluateDailyDrivingLimits,
+  getMonday,
+  MAX_BIWEEKLY_DRIVING_H,
+  MAX_WEEKLY_DRIVING_H,
+} from '@/lib/regulation561';
+import { isValidTimezone, parseDateOnlyUtc } from '@/lib/validators';
 
 // GET — Gerar relatórios do utilizador autenticado
 export async function GET(request: NextRequest) {
@@ -13,39 +22,47 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const type            = searchParams.get('type') || 'weekly';
     const timezone        = searchParams.get('timezone');
-    const referenceDate   = searchParams.get('date') ? new Date(searchParams.get('date')!) : new Date();
+    const requestedDate   = searchParams.get('date');
+    const referenceDate   = requestedDate ? parseDateOnlyUtc(requestedDate) : new Date();
     const customStartDate = searchParams.get('startDate');
     const customEndDate   = searchParams.get('endDate');
+
+    if (!['weekly', 'monthly', 'custom'].includes(type)) {
+      return NextResponse.json({ error: 'Tipo de relatório inválido' }, { status: 400 });
+    }
+    if (!referenceDate || !isValidTimezone(timezone)) {
+      return NextResponse.json({ error: 'Data ou fuso horário inválido' }, { status: 400 });
+    }
 
     let startDate: Date;
     let endDate: Date;
 
     if (type === 'custom' && customStartDate && customEndDate) {
-      startDate = new Date(customStartDate);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(customEndDate);
-      endDate.setHours(23, 59, 59, 999);
+      const parsedStartDate = parseDateOnlyUtc(customStartDate);
+      const parsedEndDate = parseDateOnlyUtc(customEndDate);
+      if (!parsedStartDate || !parsedEndDate || parsedStartDate > parsedEndDate) {
+        return NextResponse.json({ error: 'Período personalizado inválido' }, { status: 400 });
+      }
+      startDate = parsedStartDate;
+      endDate = new Date(parsedEndDate);
+      endDate.setUTCHours(23, 59, 59, 999);
+    } else if (type === 'custom') {
+      return NextResponse.json({ error: 'Datas de início e fim são obrigatórias' }, { status: 400 });
     } else if (type === 'weekly') {
-      const dayOfWeek = referenceDate.getDay();
-      const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      startDate = new Date(referenceDate);
-      startDate.setDate(referenceDate.getDate() - diff);
-      startDate.setHours(0, 0, 0, 0);
+      startDate = getMonday(referenceDate);
       endDate = new Date(startDate);
-      endDate.setDate(startDate.getDate() + 6);
-      endDate.setHours(23, 59, 59, 999);
+      endDate.setUTCDate(endDate.getUTCDate() + 7);
+      endDate.setUTCMilliseconds(endDate.getUTCMilliseconds() - 1);
     } else {
-      startDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
-      endDate.setHours(23, 59, 59, 999);
+      startDate = new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), 1));
+      endDate = new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth() + 1, 0, 23, 59, 59, 999));
     }
 
     const workDays = await db.workDay.findMany({
       where: { userId, date: { gte: startDate, lte: endDate } },
       include: {
         events:          true,
-        drivingSessions: { orderBy: { startTime: 'asc' } },
+        drivingSessions: { orderBy: { createdAt: 'asc' } },
       },
       orderBy: { date: 'asc' },
     });
@@ -55,29 +72,16 @@ export async function GET(request: NextRequest) {
     let totalHours = 0;
     let totalEvents = 0;
     const alerts: string[] = [];
-    const maxDailyHours  = 9;
-    const maxWeeklyHours = 56;
 
     const workDaysWithKm = workDays.map(day => {
       const sessions = day.drivingSessions ?? [];
 
       const kmTraveled  = calcKmTraveled(sessions, day.startKm, day.endKm) ?? 0;
-      // Calcular horas: usar sessões completadas OU fallback startTime/endTime
-      let rawHours = calcHoursWorked(sessions, day.startTime, day.endTime) ?? 0;
-
-      // Proteção dupla: limitar a 15h por dia (ninguém conduz mais que 15h por dia)
-      // Isto previne bugs de dados (ex: endTime no dia seguinte por erro de fuso)
-      const hoursWorked = Math.min(rawHours, MAX_DAY_HOURS);
+      const hoursWorked = calcWorkDayHours(day) ?? 0;
 
       totalKm     += kmTraveled;
       totalHours  += hoursWorked;
       totalEvents += day.events.length;
-
-      if (hoursWorked > maxDailyHours) {
-        alerts.push(
-          `Dia ${formatDatePtServer(day.date!, timezone)}: ${hoursWorked.toFixed(1)}h (limite: ${maxDailyHours}h)`
-        );
-      }
 
       return {
         id:           day.id,
@@ -86,18 +90,60 @@ export async function GET(request: NextRequest) {
         endTime:      day.endTime,
         startCountry: day.startCountry,
         endCountry:   day.endCountry,
-        kmTraveled:   kmTraveled || null,
+        kmTraveled:   kmTraveled ?? null,
         hoursWorked:  hoursWorked > 0 ? parseFloat(hoursWorked.toFixed(1)) : null,
         events:       day.events.length,
         sessionCount: sessions.length,
       };
     });
 
-    if (totalHours > maxWeeklyHours) {
-      alerts.push(`Total semanal: ${totalHours.toFixed(1)}h (limite: ${maxWeeklyHours}h)`);
+    let drivingLimits: ReturnType<typeof computeDrivingLimits> | null = null;
+    if (type === 'weekly') {
+      const dailyTotals = aggregateDrivingByDate(workDaysWithKm
+        .filter(day => day.date !== null)
+        .map(day => ({ date: day.date as Date, hoursWorked: day.hoursWorked ?? 0 })));
+      const previousWeekStart = new Date(startDate);
+      previousWeekStart.setUTCDate(previousWeekStart.getUTCDate() - 7);
+      const complianceDays = await db.workDay.findMany({
+        where: { userId, date: { gte: previousWeekStart, lte: endDate } },
+        select: {
+          date: true,
+          startTime: true,
+          endTime: true,
+          primaryDriverNumber: true,
+          utcOffset: true,
+          breakMinutes: true,
+          breakStart: true,
+          drivingSessions: { orderBy: { createdAt: 'asc' } },
+        },
+      });
+      drivingLimits = computeDrivingLimits(
+        complianceDays.filter(day => day.date).map(day => ({
+          date: day.date as Date,
+          hoursWorked: calcWorkDayHours(day) ?? 0,
+        })),
+        referenceDate
+      );
+
+      if (drivingLimits.weeklyHours > MAX_WEEKLY_DRIVING_H) {
+        alerts.push(`Total semanal: ${drivingLimits.weeklyHours.toFixed(1)}h (limite: ${MAX_WEEKLY_DRIVING_H}h)`);
+      }
+      if (drivingLimits.biweeklyHours > MAX_BIWEEKLY_DRIVING_H) {
+        alerts.push(`Total em duas semanas: ${drivingLimits.biweeklyHours.toFixed(1)}h (limite: ${MAX_BIWEEKLY_DRIVING_H}h)`);
+      }
+
+      const dailyLimits = evaluateDailyDrivingLimits(dailyTotals);
+      for (const excess of dailyLimits.overAbsoluteLimit) {
+        alerts.push(`Dia ${formatDatePtServer(excess.date, timezone)}: ${excess.hours.toFixed(1)}h (limite absoluto: 10h)`);
+      }
+      for (const excess of dailyLimits.exceededWeeklyExceptions) {
+        alerts.push(`Dia ${formatDatePtServer(excess.date, timezone)}: ${excess.hours.toFixed(1)}h; já foram usadas as duas exceções semanais de 10h`);
+      }
     }
 
-    const daysWorked = workDays.length;
+    const daysWorked = new Set(workDays
+      .filter(day => day.date !== null)
+      .map(day => day.date!.toISOString().slice(0, 10))).size;
 
     return NextResponse.json({
       period: { start: startDate, end: endDate, type },
@@ -110,6 +156,7 @@ export async function GET(request: NextRequest) {
         avgKmPerDay:     daysWorked > 0 ? Math.round(totalKm / daysWorked) : 0,
       },
       alerts,
+      drivingLimits,
       workDays: workDaysWithKm,
     });
   } catch (error) {

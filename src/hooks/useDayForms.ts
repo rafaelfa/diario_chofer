@@ -9,12 +9,7 @@ import type { StartFormState, EndFormState, NewEventState, LastKmInfo } from './
 import { logError } from '@/lib/logger';
 import { validateMatricula } from '@/lib/validators';
 
-interface UseDayFormsParams {
-  showToast: (message: string, type: 'success' | 'error' | 'warning') => void;
-  currentDay: { id: string } | null;
-}
-
-export function useDayForms({ showToast, currentDay }: UseDayFormsParams) {
+export function useDayForms() {
   const [startForm, setStartForm] = useState<StartFormState>({
     startCountry: '',
     startKm: '',
@@ -22,6 +17,7 @@ export function useDayForms({ showToast, currentDay }: UseDayFormsParams) {
     truckCheck: false,
     matricula: '',
     numDrivers: 1,
+    primaryDriverNumber: 1,
   });
 
   const [endForm, setEndForm] = useState<EndFormState>({
@@ -51,7 +47,7 @@ export function useDayForms({ showToast, currentDay }: UseDayFormsParams) {
       if (res.ok) {
         const data = await res.json();
         setLastKmInfo(data);
-        if (data.found && data.lastKm) {
+        if (data.found && data.lastKm != null) {
           setStartForm(prev => ({ ...prev, startKm: String(data.lastKm) }));
         }
       } else {

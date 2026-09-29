@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { calcHoursWorked, calcKmTraveled } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { logError } from '@/lib/logger';
 import { formatDatePtServer } from '@/lib/timezone';
 
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
       include: {
         events: true,
         drivingSessions: {
-          orderBy: { startTime: 'asc' }
+          orderBy: { createdAt: 'asc' }
         }
       },
       orderBy: { date: 'desc' }
@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
       const dayKm = calcKmTraveled(day.drivingSessions || [], day.startKm, day.endKm);
       if (dayKm) stats[key].totalKm += dayKm;
 
-      if (day.endKm) {
+      if (day.endKm != null) {
         stats[key].kmFinal = Math.max(stats[key].kmFinal || 0, day.endKm);
       }
       if (day.startKm && (!stats[key].kmInicial || day.startKm < stats[key].kmInicial)) {
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Horas — centralizado em calcHoursWorked
-      const dayHours = calcHoursWorked(day.drivingSessions || [], day.startTime, day.endTime);
+      const dayHours = calcWorkDayHours(day, new Date(), null);
       if (dayHours) stats[key].totalHoras += dayHours;
 
       // Eventos

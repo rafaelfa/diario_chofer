@@ -1,8 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { calcHoursWorked, calcKmTraveled } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { logError } from '@/lib/logger';
+import { getMonday } from '@/lib/regulation561';
+import { parseDateOnlyUtc } from '@/lib/validators';
+
+interface VehicleReportEntry {
+  matricula: string;
+  days: Array<{
+    date: Date | null;
+    startTime: string | null;
+    endTime: string | null;
+    kmTraveled: number;
+    hours: number;
+    startCountry: string | null;
+    endCountry: string | null;
+  }>;
+  totalKm: number;
+  totalHours: number;
+  totalEvents: number;
+}
 
 // GET - Relatórios por matrícula/veículo DO USUÁRIO LOGADO
 export async function GET(request: NextRequest) {
@@ -13,27 +32,24 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const matricula = searchParams.get('matricula');
     const type = searchParams.get('type') || 'weekly';
-    const referenceDate = searchParams.get('date') ? new Date(searchParams.get('date')!) : new Date();
+    const requestedDate = searchParams.get('date');
+    const referenceDate = requestedDate ? parseDateOnlyUtc(requestedDate) : new Date();
+
+    if (!['weekly', 'monthly'].includes(type) || !referenceDate) {
+      return NextResponse.json({ error: 'Tipo ou data inválidos' }, { status: 400 });
+    }
 
     let startDate: Date;
     let endDate: Date;
 
     if (type === 'weekly') {
-      const dayOfWeek = referenceDate.getDay();
-      const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      startDate = new Date(referenceDate);
-      startDate.setDate(referenceDate.getDate() - diff);
-      startDate.setHours(0, 0, 0, 0);
-
+      startDate = getMonday(referenceDate);
       endDate = new Date(startDate);
-      endDate.setDate(startDate.getDate() + 6);
-      endDate.setHours(23, 59, 59, 999);
+      endDate.setUTCDate(endDate.getUTCDate() + 7);
+      endDate.setUTCMilliseconds(endDate.getUTCMilliseconds() - 1);
     } else {
-      startDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1);
-      startDate.setHours(0, 0, 0, 0);
-
-      endDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
-      endDate.setHours(23, 59, 59, 999);
+      startDate = new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), 1));
+      endDate = new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth() + 1, 0, 23, 59, 59, 999));
     }
 
     // ✅ ISOLAMENTO: Buscar matrículas apenas do usuário logado
@@ -49,7 +65,7 @@ export async function GET(request: NextRequest) {
     const matriculasList = allMatriculas.map(m => m.matricula).filter(Boolean);
 
     // Se matrícula específica foi solicitada
-    const whereClause: any = {
+    const whereClause: Prisma.WorkDayWhereInput = {
       userId,  // ← OBRIGATÓRIO: isolamento por usuário
       date: {
         gte: startDate,
@@ -67,14 +83,14 @@ export async function GET(request: NextRequest) {
       include: {
         events: true,
         drivingSessions: {
-          orderBy: { startTime: 'asc' }
+          orderBy: { createdAt: 'asc' }
         }
       },
       orderBy: { date: 'asc' }
     });
 
     // Agrupar por matrícula
-    const byMatricula: Record<string, any> = {};
+    const byMatricula: Record<string, VehicleReportEntry> = {};
 
     workDays.forEach(day => {
       const key = day.matricula || 'Sem matrícula';
@@ -94,7 +110,7 @@ export async function GET(request: NextRequest) {
       byMatricula[key].totalKm += dayKm;
 
       // Horas - Calcular pelas sessões de condução
-      const dayHours = calcHoursWorked(day.drivingSessions || [], day.startTime, day.endTime) ?? 0;
+      const dayHours = calcWorkDayHours(day, new Date(), null) ?? 0;
 
       byMatricula[key].totalHours += dayHours;
 
@@ -112,12 +128,16 @@ export async function GET(request: NextRequest) {
     });
 
     // Formatar resultado
-    const result = Object.values(byMatricula).map((v: any) => ({
-      ...v,
-      totalHours: parseFloat(v.totalHours.toFixed(1)),
-      avgHoursPerDay: v.days.length > 0 ? parseFloat((v.totalHours / v.days.length).toFixed(1)) : 0,
-      avgKmPerDay: v.days.length > 0 ? Math.round(v.totalKm / v.days.length) : 0
-    }));
+    const result = Object.values(byMatricula).map(v => {
+      const daysWorked = new Set(v.days.flatMap(day => day.date ? [day.date.toISOString().slice(0, 10)] : [])).size;
+      return {
+        ...v,
+        totalHours: parseFloat(v.totalHours.toFixed(1)),
+        daysWorked,
+        avgHoursPerDay: daysWorked > 0 ? parseFloat((v.totalHours / daysWorked).toFixed(1)) : 0,
+        avgKmPerDay: daysWorked > 0 ? Math.round(v.totalKm / daysWorked) : 0,
+      };
+    });
 
     return NextResponse.json({
       period: { start: startDate, end: endDate, type },

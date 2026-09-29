@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { logError } from '@/lib/logger';
+import { isValidTimeString } from '@/lib/validators';
 
 // GET - Listar eventos DO USUÁRIO LOGADO (opcionalmente filtrados por dia)
 export async function GET(request: NextRequest) {
@@ -51,6 +52,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { workDayId, time, description } = body;
 
+    if (typeof workDayId !== 'string' || !workDayId) {
+      return NextResponse.json({ error: 'workDayId é obrigatório' }, { status: 400 });
+    }
+    if (!isValidTimeString(time)) {
+      return NextResponse.json({ error: 'Hora do evento deve estar no formato HH:MM' }, { status: 400 });
+    }
+    if (typeof description !== 'string' || !description.trim() || description.length > 1000) {
+      return NextResponse.json({ error: 'Descrição deve ter entre 1 e 1000 caracteres' }, { status: 400 });
+    }
+
     // ✅ ISOLAMENTO: Verificar se o workDay pertence ao usuário
     const workDay = await db.workDay.findFirst({
       where: {
@@ -68,7 +79,7 @@ export async function POST(request: NextRequest) {
         workDayId,
         userId,  // ← OBRIGATÓRIO: associar ao usuário logado
         time,
-        description
+        description: description.trim()
       },
       include: {
         workDay: {

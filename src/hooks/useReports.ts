@@ -40,7 +40,9 @@ export function useReports() {
         }
         const res = await fetch(url);
         if (!res.ok) return null;
-        return await res.json();
+        const data: Report = await res.json();
+        setWeeklyReport(data);
+        return data;
       } catch {
         return null;
       }
@@ -63,12 +65,18 @@ export function useReports() {
   }, []);
 
   const loadVehicleHistory = useCallback(async (matricula: string) => {
+    if (!matricula) {
+      setSelectedVehicle(null);
+      setVehicleHistory([]);
+      return;
+    }
+
     try {
       setSelectedVehicle(matricula);
       const res = await fetch(`/api/veiculos/historico?matricula=${encodeURIComponent(matricula)}`);
       if (!res.ok) return;
-      const data: VehicleHistory[] = await res.json();
-      setVehicleHistory(data);
+      const data: { historico: VehicleHistory[] } = await res.json();
+      setVehicleHistory(data.historico);
     } catch {
       // silenciar
     }

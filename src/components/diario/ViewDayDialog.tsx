@@ -51,7 +51,7 @@ export function ViewDayDialog({ day, onClose, onEdit }: ViewDayDialogProps) {
               <p className="text-xs text-muted-foreground">trabalhadas</p>
             </div>
             <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-              <p className="text-xl font-bold text-blue-600">{day.kmTraveled || '--'}</p>
+              <p className="text-xl font-bold text-blue-600">{day.kmTraveled ?? '--'}</p>
               <p className="text-xs text-muted-foreground">km total</p>
             </div>
             <div className="p-3 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
@@ -198,7 +198,7 @@ export function ViewDayDialog({ day, onClose, onEdit }: ViewDayDialogProps) {
                     </div>
                     <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded p-1.5">
                       <p className="text-muted-foreground">Percorrido</p>
-                      <p className="font-semibold">{day.kmTraveled || '--'} km</p>
+                      <p className="font-semibold">{day.kmTraveled ?? '--'} km</p>
                     </div>
                   </div>
                 </div>

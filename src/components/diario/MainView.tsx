@@ -55,7 +55,6 @@ interface MainViewProps {
   lastKmInfo: LastKmInfo | null;
   setLastKmInfo: (v: LastKmInfo | null) => void;
   checkingMatricula: boolean;
-  gpsCountry: string;
   loadingGps: boolean;
   gpsError: string | null;
   getLocation: () => void;
@@ -65,13 +64,11 @@ interface MainViewProps {
   onStartDay: () => Promise<void>;
   onEndDay: () => Promise<void>;
   onAddEvent: () => Promise<void>;
-  onPauseDriving: () => Promise<void>;
   onResumeDriving: () => void;
   onOpenPauseDialog: () => void;
   onLoadWorkDays: () => Promise<void>;
   isStarting?: boolean;
   isEnding?: boolean;
-  isSaving?: boolean;
   isDeleting?: boolean;
   // Break (1 driver)
   breakState: BreakState;
@@ -91,14 +88,13 @@ export function MainView({
   showEndForm, setShowEndForm,
   lastKmInfo, setLastKmInfo,
   checkingMatricula,
-  gpsCountry, loadingGps, gpsError, getLocation,
+  loadingGps, gpsError, getLocation,
   formatTime, formatDate, checkLastKm,
   onStartDay, onEndDay, onAddEvent,
-  onPauseDriving, onResumeDriving, onOpenPauseDialog,
+  onResumeDriving, onOpenPauseDialog,
   onLoadWorkDays,
   isStarting,
   isEnding,
-  isSaving,
   breakState,
   breakMinutes,
   onOpenBreak,
@@ -311,6 +307,32 @@ export function MainView({
                         </button>
                       </div>
                     </div>
+
+                    {startForm.numDrivers === 2 && (
+                      <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-xl">
+                        <div>
+                          <span className="text-sm font-medium">Você conduz como</span>
+                          <p className="text-xs text-muted-foreground">Para calcular seus limites pessoais</p>
+                        </div>
+                        <div className="flex gap-1 bg-slate-200 dark:bg-slate-700 rounded-lg p-1">
+                          {([1, 2] as const).map(driverNumber => (
+                            <button
+                              key={driverNumber}
+                              type="button"
+                              aria-pressed={startForm.primaryDriverNumber === driverNumber}
+                              onClick={() => setStartForm({ ...startForm, primaryDriverNumber: driverNumber })}
+                              className={`px-3 py-2 rounded-md text-sm font-semibold transition-all ${
+                                startForm.primaryDriverNumber === driverNumber
+                                  ? 'bg-white dark:bg-slate-600 text-blue-600 shadow-sm'
+                                  : 'text-muted-foreground hover:text-foreground'
+                              }`}
+                            >
+                              Motorista {driverNumber}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground flex items-center gap-1">
@@ -627,7 +649,7 @@ export function MainView({
                   <div>
                     <h2 className="text-xl font-bold">Dia Finalizado!</h2>
                     <p className="text-muted-foreground">
-                      Você trabalhou <span className="font-bold text-emerald-600">{formatDecimalHours(currentDay.hoursWorked)}</span> e percorreu <span className="font-bold text-blue-600">{currentDay.kmTraveled || 0} km</span>
+                      Você trabalhou <span className="font-bold text-emerald-600">{formatDecimalHours(currentDay.hoursWorked)}</span> e percorreu <span className="font-bold text-blue-600">{currentDay.kmTraveled ?? 0} km</span>
                     </p>
                   </div>
                   <Button onClick={() => onLoadWorkDays()} className="bg-emerald-600 hover:bg-emerald-700 h-14 font-bold">

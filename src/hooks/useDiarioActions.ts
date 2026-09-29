@@ -23,7 +23,7 @@ import { useDialogManager } from '@/hooks/useDialogManager';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import type { WorkDay, ActiveView } from '@/lib/types';
 import { logError } from '@/lib/logger';
-import { diffInMinutes, minutesToFormatted } from '@/lib/time';
+import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
 import { validateMatricula } from '@/lib/validators';
 import {
   getLocalDateString,
@@ -41,6 +41,7 @@ export interface StartFormState {
   truckCheck: boolean;
   matricula: string;
   numDrivers: number; // 1 = motorista único, 2 = equipa
+  primaryDriverNumber: 1 | 2;
 }
 
 export interface EndFormState {
@@ -107,15 +108,14 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   } = workDaysActions;
 
   const {
-    loadingPdf,
     loadWeeklyReport,
     loadReport,
     loadVehicleStats,
-    loadVehicleHistory,
   } = reportsActions;
 
   // ─── Compose sub-hooks ──────────────────────────────────────────────────
   const { isOnline } = useConnectivity();
+  const [clockNow, setClockNow] = useState<Date | null>(null);
 
   // useDialogManager MUST be called before useWorkingTime because
   // useWorkingTime depends on breakState from useDialogManager.
@@ -136,10 +136,11 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
   const {
     calculateWorkingTime,
+    getBreakMinutes,
     getConformityStatus,
     formatTime,
     formatDate,
-  } = useWorkingTime(currentDay, breakState);
+  } = useWorkingTime(currentDay, breakState, clockNow);
 
   const {
     startForm, setStartForm,
@@ -150,7 +151,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     lastKmInfo, setLastKmInfo,
     checkingMatricula,
     checkLastKm,
-  } = useDayForms({ showToast, currentDay });
+  } = useDayForms();
 
   const {
     reportType, setReportType,
@@ -161,10 +162,9 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   // ─── Estado local (not extracted — unique to facade) ─────────────────────
   const [activeView, setActiveView] = useState<ActiveView>('main');
   const [currentUser, setCurrentUser] = useState<{ username: string } | null>(null);
-  const [, setTick] = useState(0);
   const [isStarting, setIsStarting] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const { country: gpsCountry, loading: loadingGps, error: gpsError, getLocation } = useGeolocation();
@@ -173,12 +173,16 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   //  EFFECTS
   // ═══════════════════════════════════════════════════════════════════════
 
-  // Actualizar tempo a cada minuto
+  // Atualizar o relógio fora do render para manter os cálculos puros.
   useEffect(() => {
+    const frame = requestAnimationFrame(() => setClockNow(new Date()));
     const interval = setInterval(() => {
-      setTick(t => t + 1);
+      setClockNow(new Date());
     }, 60000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearInterval(interval);
+    };
   }, []);
 
   // Carregar dados iniciais (auth + workdays + weekly report)
@@ -205,7 +209,8 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   }, [loadWorkDays, loadWeeklyReport, showToast, router]);
 
   useEffect(() => {
-    loadAppData();
+    const frame = requestAnimationFrame(() => { void loadAppData(); });
+    return () => cancelAnimationFrame(frame);
   }, [loadAppData]);
 
   // Preencher país automaticamente quando GPS detectar
@@ -224,7 +229,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       getLocation();
     }
     if (showEndForm && currentDay) {
-      const lastKm = currentDay.lastSessionKm || currentDay.startKm || 0;
+      const lastKm = currentDay.lastSessionKm ?? currentDay.startKm ?? 0;
       setEndForm(prev => ({ ...prev, endKm: lastKm ? lastKm.toString() : '' }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -259,7 +264,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportType, activeView]);
+  }, [reportType, activeView, customDateStart, customDateEnd]);
 
   // ═══════════════════════════════════════════════════════════════════════
   //  HANDLERS PRINCIPAIS
@@ -298,11 +303,6 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
             onClick: () => { setConfirmDialog(null); },
             variant: 'default' as const,
           },
-          ...(isToday ? [{
-            label: 'Nova Jornada',
-            onClick: () => { setConfirmDialog(null); proceedWithStartDay(today, now); },
-            variant: 'outline' as const,
-          }] : []),
           {
             label: 'Cancelar',
             onClick: () => setConfirmDialog(null),
@@ -380,11 +380,12 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         truckCheck: startForm.truckCheck,
         matricula: startForm.matricula.toUpperCase(),
         numDrivers: startForm.numDrivers,
+        primaryDriverNumber: startForm.numDrivers === 2 ? startForm.primaryDriverNumber : 1,
         timezone: getClientTimezone(),
         utcOffset: getUtcOffsetString(now),
       });
 
-      setStartForm({ startCountry: '', startKm: '', lastRest: '', truckCheck: false, matricula: '', numDrivers: 1 });
+      setStartForm({ startCountry: '', startKm: '', lastRest: '', truckCheck: false, matricula: '', numDrivers: 1, primaryDriverNumber: 1 });
       setLastKmInfo(null);
       // Reiniciar contador de pausas acumuladas ao iniciar novo dia
       setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: 0 });
@@ -406,33 +407,23 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       return;
     }
 
-    if (endForm.endKm && currentDay.startKm) {
-      const endKm = parseInt(endForm.endKm);
-      if (endKm <= currentDay.startKm) {
-        showToast('KM final deve ser maior que KM inicial', 'error');
+    const previousKm = currentDay.lastSessionKm ?? currentDay.startKm;
+    if (endForm.endKm && previousKm != null) {
+      const endKm = Number(endForm.endKm);
+      if (!Number.isSafeInteger(endKm) || endKm < previousKm) {
+        showToast('KM final deve ser um inteiro e não pode ser menor que o último KM registrado', 'error');
         return;
       }
     }
 
     const now = new Date();
     const endTime = getLocalTimeString(now);
-    const sessions = currentDay.drivingSessions || [];
-    let totalDrivingMinutes = 0;
-
-    for (const session of sessions) {
-      if (session.endTime) {
-        const diff = diffInMinutes(session.startTime, session.endTime);
-        if (diff !== null && diff <= 720) totalDrivingMinutes += diff;
-      } else {
-        const diff = diffInMinutes(session.startTime, endTime);
-        if (diff !== null && diff <= 720) totalDrivingMinutes += diff;
-      }
-    }
-
-    if (totalDrivingMinutes === 0) {
-      const diff = diffInMinutes(currentDay.startTime, endTime);
-      if (diff !== null && diff <= 900) totalDrivingMinutes = diff;
-    }
+    const totalDrivingMinutes = calcDrivingMinutes(
+      (currentDay.drivingSessions || []).filter(session => (session.driverNumber ?? 1) === (currentDay.primaryDriverNumber ?? 1)),
+      currentDay.startTime,
+      currentDay.endTime,
+      { currentTime: endTime, breakMinutes: getBreakMinutes() }
+    ) ?? 0;
     const hoursWorked = totalDrivingMinutes / 60;
 
     if (hoursWorked > 9) {
@@ -463,8 +454,12 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         endKm: endForm.endKm ? String(parseInt(endForm.endKm)) : '',
         amplitude: '',
         observations: endForm.observations,
+        breakStart: null,
+        breakType: null,
+        breakMinutes: getBreakMinutes(),
       });
 
+      setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: getBreakMinutes() });
       setShowEndForm(false);
       setEndForm({ endCountry: '', endKm: '', observations: '' });
       showToast('Dia finalizado com sucesso!', 'success');
@@ -503,7 +498,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
   const handleOpenPauseDialog = () => {
     if (!currentDay) return;
-    const lastKm = currentDay.lastSessionKm || currentDay.startKm || 0;
+    const lastKm = currentDay.lastSessionKm ?? currentDay.startKm ?? 0;
     setPauseKm(lastKm ? lastKm.toString() : '');
     setShowPauseDialog(true);
   };
@@ -511,9 +506,9 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   const handlePauseDriving = async () => {
     if (!currentDay) return;
 
-    const kmValue = pauseKm ? parseInt(pauseKm) : null;
+    const kmValue = pauseKm ? Number(pauseKm) : null;
 
-    if (!kmValue) {
+    if (kmValue === null || !Number.isSafeInteger(kmValue) || kmValue < 0) {
       showToast('Por favor, informe o KM atual', 'warning');
       return;
     }
@@ -533,7 +528,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
   const handleResumeDriving = () => {
     if (!currentDay) return;
-    const lastKm = currentDay.lastSessionKm || currentDay.startKm || 0;
+    const lastKm = currentDay.lastSessionKm ?? currentDay.startKm ?? 0;
     setPauseKm(lastKm ? lastKm.toString() : '');
     setShowPauseDialog(true);
   };
@@ -541,9 +536,9 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   const handleConfirmResume = async () => {
     if (!currentDay) return;
 
-    const kmValue = pauseKm ? parseInt(pauseKm) : null;
+    const kmValue = pauseKm ? Number(pauseKm) : null;
 
-    if (!kmValue) {
+    if (kmValue === null || !Number.isSafeInteger(kmValue) || kmValue < 0) {
       showToast('Por favor, informe o KM atual do veículo', 'warning');
       return;
     }
@@ -574,10 +569,20 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     if (dbActive) {
       setBreakState(prev => {
         if (prev.isActive && prev.startTime) return prev;
-        return { isActive: true, startTime: new Date(currentDay.breakStart as string), type: currentDay.breakType as 'continuous' | 'split', completedBreakMinutes: 0 };
+        return {
+          isActive: true,
+          startTime: new Date(currentDay.breakStart as string),
+          type: currentDay.breakType as 'continuous' | 'split',
+          completedBreakMinutes: currentDay.breakMinutes ?? 0,
+        };
       });
-    } else if (!currentDay.breakStart) {
-      setBreakState(prev => (prev.isActive ? { ...prev, isActive: false, startTime: null, type: 'none' } : prev));
+    } else {
+      setBreakState({
+        isActive: false,
+        startTime: null,
+        type: 'none',
+        completedBreakMinutes: currentDay.breakMinutes ?? 0,
+      });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDay?.id, currentDay?.breakStart, currentDay?.breakType]);
@@ -590,18 +595,24 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       return { ...prev, isActive: true, startTime: null, type: 'none' };
     });
   }, [setBreakState, showToast]);
-  }, [setBreakState]);
 
   // Confirms break type and starts the timer
-  const handleStartBreak = useCallback((type: 'continuous' | 'split') => {
-    setBreakState(prev => ({
-      ...prev,
-      isActive: true,
-      startTime: new Date(),
-      type,
-    }));
-    showToast('Pausa iniciada!', 'success');
-  }, [setBreakState, showToast]);
+  const handleStartBreak = useCallback(async (type: 'continuous' | 'split') => {
+    const startedAt = new Date();
+    setBreakState(prev => ({ ...prev, isActive: true, startTime: startedAt, type }));
+    try {
+      if (currentDay) {
+        await saveBreakState(currentDay.id, {
+          breakStart: startedAt.toISOString(),
+          breakType: type,
+          breakMinutes: breakState.completedBreakMinutes,
+        });
+      }
+      showToast('Pausa iniciada!', 'success');
+    } catch {
+      showToast('Não foi possível salvar a pausa. Verifique a conexão.', 'error');
+    }
+  }, [breakState.completedBreakMinutes, currentDay, saveBreakState, setBreakState, showToast]);
 
   const handleEndBreak = useCallback(() => {
     // Calcular duração da pausa que está a terminar
@@ -610,15 +621,19 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       breakMinutes = Math.floor((Date.now() - breakState.startTime.getTime()) / 60000);
     }
 
-    setBreakState(prev => ({
-      isActive: false,
-      startTime: null,
-      type: 'none',
-      // Acumular minutos de pausa concluída (arredondado para cima, mínimo 1 min)
-      completedBreakMinutes: prev.completedBreakMinutes + Math.max(breakMinutes, 0),
-    }));
-    showToast('Condução retomada!', 'success');
-  }, [breakState.startTime, setBreakState, showToast]);
+    const completedBreakMinutes = breakState.completedBreakMinutes + Math.max(breakMinutes, 0);
+    setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes });
+    void (async () => {
+      try {
+        if (currentDay) {
+          await saveBreakState(currentDay.id, { breakStart: null, breakType: null, breakMinutes: completedBreakMinutes });
+        }
+        showToast('Condução retomada!', 'success');
+      } catch {
+        showToast('Não foi possível salvar o fim da pausa. Verifique a conexão.', 'error');
+      }
+    })();
+  }, [breakState.completedBreakMinutes, breakState.startTime, currentDay, saveBreakState, setBreakState, showToast]);
 
   // ═══════════════════════════════════════════════════════════════════════
   //  GERENCIAMENTO (VIEW / EDIT / DELETE)
@@ -771,7 +786,6 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
     // --- Online/GPS ---
     isOnline,
-    gpsCountry,
     loadingGps,
     gpsError,
     getLocation,
@@ -803,13 +817,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     handleStartBreak,
     handleEndBreak,
     /** Total de minutos de pausa (concluídas + em curso) — v4.1.5 */
-    breakMinutes: (() => {
-      let total = breakState.completedBreakMinutes || 0;
-      if (breakState.isActive && breakState.startTime) {
-        total += Math.floor((Date.now() - breakState.startTime.getTime()) / 60000);
-      }
-      return Math.max(total, 0);
-    })(),
+    breakMinutes: getBreakMinutes(),
 
     // --- Computed ---
     conformity,
@@ -839,7 +847,6 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     // --- Loading states ---
     isStarting,
     isEnding,
-    isSaving,
     isDeleting,
 
     // --- Helpers ---

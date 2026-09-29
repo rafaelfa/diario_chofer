@@ -9,9 +9,12 @@
  */
 export function parseTimeToMinutes(time: string | null | undefined): number | null {
   if (!time) return null;
-  const parts = time.split(':').map(Number);
-  if (parts.length !== 2 || parts.some(isNaN)) return null;
-  return parts[0] * 60 + parts[1];
+  const match = /^(\d{2}):(\d{2})$/.exec(time);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
 }
 
 /**
@@ -44,44 +47,52 @@ export function diffInMinutes(
  * Ignora sessões com duração > 12h (provável erro de dados).
  * Limita o total a 15h por dia (proteção contra bugs de fuso horário).
  */
-const MAX_SESSION_HOURS = 12;  // Uma sessão não deve durar mais que 12h
 export const MAX_DAY_HOURS = 15;      // Total diário nunca deve exceder 15h
 
-export function calcHoursWorked(
-  sessions: Array<{ startTime?: string | null; endTime?: string | null }>,
+export interface TimeCalculationOptions {
+  currentTime?: string | null;
+  breakMinutes?: number;
+}
+
+export function calcDrivingMinutes(
+  sessions: Array<{ startTime?: string | null; endTime?: string | null; status?: string }>,
   fallbackStart?: string | null,
-  fallbackEnd?: string | null
+  fallbackEnd?: string | null,
+  options: TimeCalculationOptions = {}
 ): number | null {
-  // Só calcular pelas sessões COMPLETAS (com startTime + endTime preenchidos)
-  const completedSessions = sessions.filter(
-    s => s.startTime && s.endTime
+  const timedSessions = sessions.filter(session =>
+    session.startTime && (session.endTime || (session.status === 'active' && options.currentTime))
   );
 
-  if (completedSessions.length > 0) {
-    const sessionMinutes = completedSessions.reduce((acc, session) => {
-      const diff = diffInMinutes(session.startTime, session.endTime);
-      if (diff === null) return acc;
-      // Ignorar sessões com duração irreal (> 12h = 720 min)
-      if (diff > MAX_SESSION_HOURS * 60) return acc;
-      return acc + diff;
-    }, 0);
+  let totalMinutes = 0;
 
-    // Proteção: limitar a 15h (900 min)
-    const clampedMinutes = Math.min(sessionMinutes, MAX_DAY_HOURS * 60);
-    return parseFloat((clampedMinutes / 60).toFixed(2));
+  if (timedSessions.length > 0) {
+    for (const session of timedSessions) {
+      const endTime = session.endTime || options.currentTime;
+      const difference = diffInMinutes(session.startTime, endTime);
+      if (difference === null) return null;
+      totalMinutes += difference;
+    }
+  } else {
+    const endTime = fallbackEnd || options.currentTime;
+    if (!fallbackStart || !endTime) return null;
+    const difference = diffInMinutes(fallbackStart, endTime);
+    if (difference === null) return null;
+    totalMinutes = difference;
   }
 
-  // Fallback: usar horário do dia completo (só se ambos definidos)
-  if (fallbackStart && fallbackEnd) {
-    const fallbackMinutes = diffInMinutes(fallbackStart, fallbackEnd);
-    if (fallbackMinutes === null) return null;
-    // Ignorar se a diferença for irreal (> 15h)
-    if (fallbackMinutes > MAX_DAY_HOURS * 60) return null;
-    return parseFloat((fallbackMinutes / 60).toFixed(2));
-  }
+  const breakMinutes = Number.isFinite(options.breakMinutes) ? Math.max(0, options.breakMinutes ?? 0) : 0;
+  return Math.max(0, totalMinutes - breakMinutes);
+}
 
-  // Sem dados suficientes para calcular
-  return null;
+export function calcHoursWorked(
+  sessions: Array<{ startTime?: string | null; endTime?: string | null; status?: string }>,
+  fallbackStart?: string | null,
+  fallbackEnd?: string | null,
+  options: TimeCalculationOptions = {}
+): number | null {
+  const totalMinutes = calcDrivingMinutes(sessions, fallbackStart, fallbackEnd, options);
+  return totalMinutes === null ? null : parseFloat((totalMinutes / 60).toFixed(2));
 }
 
 /**
@@ -93,20 +104,16 @@ export function calcKmTraveled(
   fallbackStartKm?: number | null,
   fallbackEndKm?: number | null
 ): number | null {
-  const kmFromSessions = sessions.reduce((total, session) => {
-    if (session.startKm != null && session.endKm != null) {
-      // BUG-03: Proteger contra KM negativos (endKm < startKm)
-      if (session.endKm >= session.startKm) {
-        return total + (session.endKm - session.startKm);
-      }
+  if (sessions.length > 0 && sessions.every(session => session.startKm != null && session.endKm != null)) {
+    let total = 0;
+    for (const session of sessions) {
+      if (session.startKm == null || session.endKm == null || session.endKm < session.startKm) return null;
+      total += session.endKm - session.startKm;
     }
     return total;
-  }, 0);
-
-  if (kmFromSessions > 0) return kmFromSessions;
+  }
 
   if (fallbackStartKm != null && fallbackEndKm != null) {
-    // BUG-03: Proteger contra KM negativos (fallbackEndKm < fallbackStartKm)
     if (fallbackEndKm >= fallbackStartKm) {
       return fallbackEndKm - fallbackStartKm;
     }
@@ -136,4 +143,60 @@ export function formatDecimalHours(decimalHours: number | null | undefined): str
   const m = totalMin % 60;
   if (m === 0) return `${h}h`;
   return `${h}h${m.toString().padStart(2, '0')}min`;
+}
+
+export function getTimeAtUtcOffset(date: Date, utcOffset?: string | null): string {
+  const match = /^([+-])(\d{2}):(\d{2})$/.exec(utcOffset || '');
+  if (!match || Number(match[2]) > 14 || Number(match[3]) > 59) {
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
+
+  const sign = match[1] === '+' ? 1 : -1;
+  const offsetMinutes = sign * (Number(match[2]) * 60 + Number(match[3]));
+  const offsetDate = new Date(date.getTime() + offsetMinutes * 60000);
+  return `${String(offsetDate.getUTCHours()).padStart(2, '0')}:${String(offsetDate.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+export function getTotalBreakMinutes(
+  completedMinutes: number | null | undefined,
+  activeBreakStart?: Date | string | null,
+  now: Date = new Date()
+): number {
+  const completed = Number.isFinite(completedMinutes) ? Math.max(0, completedMinutes ?? 0) : 0;
+  if (!activeBreakStart) return completed;
+
+  const start = activeBreakStart instanceof Date ? activeBreakStart : new Date(activeBreakStart);
+  if (Number.isNaN(start.getTime())) return completed;
+  const activeMinutes = Math.max(0, Math.floor((now.getTime() - start.getTime()) / 60000));
+  return completed + activeMinutes;
+}
+
+export function calcWorkDayHours(
+  workDay: {
+    startTime?: string | null;
+    endTime?: string | null;
+    utcOffset?: string | null;
+    primaryDriverNumber?: number | null;
+    breakMinutes?: number | null;
+    breakStart?: Date | string | null;
+    drivingSessions?: Array<{
+      startTime?: string | null;
+      endTime?: string | null;
+      status?: string;
+      driverNumber?: number | null;
+      utcOffset?: string | null;
+    }>;
+  },
+  now: Date = new Date(),
+  driverNumber: number | null = workDay.primaryDriverNumber ?? 1
+): number | null {
+  const sessions = (workDay.drivingSessions ?? []).filter(session =>
+    driverNumber === null || (session.driverNumber ?? 1) === driverNumber
+  );
+  const activeSession = sessions.find(session => session.status === 'active' && !session.endTime);
+
+  return calcHoursWorked(sessions, workDay.startTime, workDay.endTime, {
+    currentTime: getTimeAtUtcOffset(now, activeSession?.utcOffset ?? workDay.utcOffset),
+    breakMinutes: getTotalBreakMinutes(workDay.breakMinutes, workDay.breakStart, now),
+  });
 }

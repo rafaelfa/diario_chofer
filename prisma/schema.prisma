@@ -46,6 +46,7 @@ model WorkDay {
   matricula     String?          // Matrícula do caminhão (formato europeu: AA-00-BB)
   isPaused      Boolean          @default(false) @map("is_paused") // Indica se está pausado (outro motorista dirigindo)
   numDrivers    Int              @default(1) @map("num_drivers") // 1 = motorista único, 2 = equipa com 2 motoristas
+  primaryDriverNumber Int         @default(1) @map("primary_driver_number")
   timezone      String?          // Fuso horário no início do dia (ex: "Europe/Lisbon")
   utcOffset     String?          @map("utc_offset") // Offset UTC no início (ex: "+01:00" ou "+00:00")
   createdAt     DateTime         @default(now()) @map("created_at")
@@ -94,6 +95,7 @@ model DrivingSession {
   startKm     Int?     @map("start_km")   // KM no início da sessão
   endKm       Int?     @map("end_km")     // KM no fim da sessão
   status      String   @default("active") // active, paused, ended
+  driverNumber Int     @default(1) @map("driver_number") // Motorista que conduziu esta sessão (1 ou 2)
   utcOffset   String?  @map("utc_offset") // Offset UTC no momento da sessão (ex: "+01:00")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -125,4 +127,13 @@ model Settings {
 
   @@index([userId])
   @@map("settings")
+}
+
+model RateLimit {
+  identifier String   @id
+  count      Int
+  resetAt    DateTime @map("reset_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("rate_limits")
 }

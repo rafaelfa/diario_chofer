@@ -27,6 +27,7 @@ interface StartDayPayload {
   truckCheck: boolean;
   matricula: string;
   numDrivers: number;
+  primaryDriverNumber: 1 | 2;
   timezone?: string;
   utcOffset?: string;
 }
@@ -37,6 +38,9 @@ interface EndDayPayload {
   endKm: string;
   amplitude: string;
   observations: string;
+  breakStart?: string | null;
+  breakType?: string | null;
+  breakMinutes?: number;
 }
 
 interface EditDayPayload {
@@ -96,6 +100,7 @@ export function useWorkDays() {
         truckCheck: payload.truckCheck,
         matricula: payload.matricula || null,
         numDrivers: payload.numDrivers || 1,
+        primaryDriverNumber: payload.primaryDriverNumber,
         timezone: payload.timezone || null,
         utcOffset: payload.utcOffset || null,
       }),
@@ -175,18 +180,25 @@ export function useWorkDays() {
   /** Persiste o estado da pausa no banco (fire-and-forget com retry único) */
   const saveBreakState = useCallback(
     async (dayId: string, payload: { breakStart: string | null; breakType: string | null; breakMinutes: number }): Promise<void> => {
-      const send = () =>
-        fetch(`/api/workdays/${dayId}`, {
+      const send = () => fetch(`/api/workdays/${dayId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
+
+      let response: Response;
       try {
-        const res = await send();
-        if (!res.ok) await send(); // retry único
+        response = await send();
+        if (!response.ok) response = await send();
       } catch {
-        try { await send(); } catch { /* offline — será re-sincronizado na próxima ação */ }
+        response = await send();
       }
+
+      if (!response.ok) throw new Error('Não foi possível salvar a pausa');
+
+      const updated: WorkDay = await response.json();
+      setWorkDays(prev => prev.map(day => day.id === dayId ? updated : day));
+      setCurrentDay(prev => prev?.id === dayId ? updated : prev);
     },
     []
   );
@@ -280,5 +292,6 @@ export function useWorkDays() {
     addEvent,
     pauseDriving,
     resumeDriving,
+    saveBreakState,
   };
 }

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { Prisma } from '@prisma/client';
 import { requireAuth } from '@/lib/auth';
-import { calcHoursWorked, calcKmTraveled } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
+import { isValidTimeString, parseNonNegativeInteger, validateMatricula } from '@/lib/validators';
 
 // GET - Buscar dia de trabalho por ID (apenas se pertencer ao usuário)
 export async function GET(
@@ -25,7 +27,7 @@ export async function GET(
           orderBy: { time: 'asc' }
         },
         drivingSessions: {
-          orderBy: { startTime: 'asc' }
+          orderBy: { createdAt: 'asc' }
         }
       }
     });
@@ -38,13 +40,13 @@ export async function GET(
     const kmTraveled = calcKmTraveled(workDay.drivingSessions || [], workDay.startKm, workDay.endKm);
 
     // Calcular horas trabalhadas — centralizado em calcHoursWorked
-    const hoursWorked = calcHoursWorked(workDay.drivingSessions || [], workDay.startTime, workDay.endTime);
+    const hoursWorked = calcWorkDayHours(workDay);
 
     // Calcular último KM da sessão
     let lastSessionKm: number | null = null;
     if (workDay.drivingSessions && workDay.drivingSessions.length > 0) {
       const lastSession = workDay.drivingSessions[workDay.drivingSessions.length - 1];
-      lastSessionKm = lastSession.endKm || lastSession.startKm;
+      lastSessionKm = lastSession.endKm ?? lastSession.startKm;
     }
 
     // Contar sessões de condução
@@ -83,7 +85,8 @@ export async function PUT(
 
     // ✅ ISOLAMENTO: Verificar se o registro pertence ao usuário
     const existingWorkDay = await db.workDay.findFirst({
-      where: { id, userId }
+      where: { id, userId },
+      include: { drivingSessions: { orderBy: { createdAt: 'asc' } } },
     });
 
     if (!existingWorkDay) {
@@ -94,72 +97,107 @@ export async function PUT(
     const dataToUpdate: Record<string, unknown> = {};
 
     if (body.date !== undefined) {
-      const parsedDate = new Date(body.date);
-      if (isNaN(parsedDate.getTime())) {
+      if (typeof body.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
+        return NextResponse.json({ error: 'Data inválida' }, { status: 400 });
+      }
+      const parsedDate = new Date(`${body.date}T00:00:00.000Z`);
+      if (Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== body.date) {
         return NextResponse.json({ error: 'Data inválida' }, { status: 400 });
       }
       dataToUpdate.date = parsedDate;
     }
-    if (body.startTime !== undefined) dataToUpdate.startTime = body.startTime;
+    if (body.startTime !== undefined) {
+      if (!isValidTimeString(body.startTime)) return NextResponse.json({ error: 'Hora inicial inválida' }, { status: 400 });
+      dataToUpdate.startTime = body.startTime;
+    }
+    if (body.endTime !== undefined && body.endTime !== null && body.endTime !== '' && !isValidTimeString(body.endTime)) {
+      return NextResponse.json({ error: 'Hora final inválida' }, { status: 400 });
+    }
     if (body.endTime !== undefined) dataToUpdate.endTime = body.endTime || null;
-    if (body.startCountry !== undefined) dataToUpdate.startCountry = body.startCountry || null;
-    if (body.endCountry !== undefined) dataToUpdate.endCountry = body.endCountry || null;
-    if (body.startKm !== undefined) dataToUpdate.startKm = body.startKm ? parseInt(body.startKm) : null;
-    if (body.endKm !== undefined) dataToUpdate.endKm = body.endKm ? parseInt(body.endKm) : null;
+    if (body.startCountry !== undefined) {
+      if (body.startCountry !== null && typeof body.startCountry !== 'string') return NextResponse.json({ error: 'País inicial inválido' }, { status: 400 });
+      dataToUpdate.startCountry = body.startCountry?.trim() || null;
+    }
+    if (body.endCountry !== undefined) {
+      if (body.endCountry !== null && typeof body.endCountry !== 'string') return NextResponse.json({ error: 'País final inválido' }, { status: 400 });
+      dataToUpdate.endCountry = body.endCountry?.trim() || null;
+    }
+    const parsedStartKm = body.startKm === undefined ? null : parseNonNegativeInteger(body.startKm);
+    const parsedEndKm = body.endKm === undefined ? null : parseNonNegativeInteger(body.endKm);
+    if (parsedStartKm && !parsedStartKm.valid || parsedEndKm && !parsedEndKm.valid) {
+      return NextResponse.json({ error: 'KM deve ser um inteiro não negativo' }, { status: 400 });
+    }
+    if (body.startKm !== undefined) dataToUpdate.startKm = parsedStartKm?.value ?? null;
+    if (body.endKm !== undefined) dataToUpdate.endKm = parsedEndKm?.value ?? null;
+    const startKm = body.startKm !== undefined ? parsedStartKm?.value : existingWorkDay.startKm;
+    const endKm = body.endKm !== undefined ? parsedEndKm?.value : existingWorkDay.endKm;
+    if (startKm != null && endKm != null && endKm < startKm) {
+      return NextResponse.json({ error: 'KM final não pode ser menor que o KM inicial' }, { status: 400 });
+    }
     if (body.lastRest !== undefined) dataToUpdate.lastRest = body.lastRest || null;
     if (body.amplitude !== undefined) dataToUpdate.amplitude = body.amplitude || null;
     if (body.truckCheck !== undefined) dataToUpdate.truckCheck = Boolean(body.truckCheck);
     if (body.observations !== undefined) dataToUpdate.observations = body.observations || null;
-    if (body.matricula !== undefined) dataToUpdate.matricula = body.matricula ? body.matricula.toUpperCase() : null;
-     // Estado da pausa (persistência — sobrevive a refresh/fecho do app)
-    if (body.breakStart !== undefined) {
-      dataToUpdate.breakStart = body.breakStart ? new Date(body.breakStart) : null;
+    if (body.matricula !== undefined) {
+      if (body.matricula && typeof body.matricula !== 'string') return NextResponse.json({ error: 'Matrícula inválida' }, { status: 400 });
+      if (body.matricula) {
+        const { valid, normalized } = validateMatricula(body.matricula);
+        if (!valid) return NextResponse.json({ error: 'Formato de matrícula inválido' }, { status: 400 });
+        dataToUpdate.matricula = normalized;
+      } else {
+        dataToUpdate.matricula = null;
+      }
     }
-    if (body.breakType !== undefined) dataToUpdate.breakType = body.breakType || null;
+    if (body.breakStart !== undefined) {
+      const parsedBreakStart = body.breakStart ? new Date(body.breakStart) : null;
+      if (parsedBreakStart && Number.isNaN(parsedBreakStart.getTime())) return NextResponse.json({ error: 'Início da pausa inválido' }, { status: 400 });
+      dataToUpdate.breakStart = parsedBreakStart;
+    }
+    if (body.breakType !== undefined) {
+      if (body.breakType !== null && body.breakType !== '' && !['continuous', 'split'].includes(body.breakType)) {
+        return NextResponse.json({ error: 'Tipo de pausa inválido' }, { status: 400 });
+      }
+      dataToUpdate.breakType = body.breakType || null;
+    }
     if (body.breakMinutes !== undefined) {
-      const bm = parseInt(String(body.breakMinutes), 10);
-      dataToUpdate.breakMinutes = isNaN(bm) || bm < 0 ? 0 : bm;
+      const parsedBreakMinutes = parseNonNegativeInteger(body.breakMinutes);
+      if (!parsedBreakMinutes.valid) return NextResponse.json({ error: 'Minutos de pausa inválidos' }, { status: 400 });
+      dataToUpdate.breakMinutes = parsedBreakMinutes.value ?? 0;
     }
 
     log('Dados a atualizar:', JSON.stringify(dataToUpdate, null, 2));
 
-    // Se está finalizando o dia (tem endTime), atualizar também a sessão ativa
-    if (body.endTime && body.endKm) {
-      const endTime = body.endTime;
-      const endKm = parseInt(body.endKm);
+    const workDay = await db.$transaction(async transaction => {
+      const sessions = existingWorkDay.drivingSessions;
+      const firstSession = sessions[0];
+      const lastSession = sessions[sessions.length - 1];
 
-      // Buscar sessão ativa (sem endTime) DO USUÁRIO
-      const activeSession = await db.drivingSession.findFirst({
-        where: {
-          workDayId: id,
-          userId,  // ✅ ISOLAMENTO
-          endTime: null
-        }
-      });
-
-      if (activeSession) {
-        log(`Atualizando sessão ativa ${activeSession.id} com endTime=${endTime}, endKm=${endKm}`);
-        await db.drivingSession.update({
-          where: { id: activeSession.id },
+      if (firstSession && (body.startTime !== undefined || body.startKm !== undefined)) {
+        await transaction.drivingSession.update({
+          where: { id: firstSession.id },
           data: {
-            endTime: endTime,
-            endKm: endKm,
-            status: 'ended'
-          }
+            ...(body.startTime !== undefined ? { startTime: body.startTime } : {}),
+            ...(body.startKm !== undefined ? { startKm: parsedStartKm?.value ?? null } : {}),
+          },
         });
       }
-    }
 
-    const workDay = await db.workDay.update({
-      where: { id },
-      data: dataToUpdate,
-      include: {
-        events: true,
-        drivingSessions: {
-          orderBy: { startTime: 'asc' }
-        }
+      if (lastSession && (body.endTime !== undefined || body.endKm !== undefined)) {
+        await transaction.drivingSession.update({
+          where: { id: lastSession.id },
+          data: {
+            ...(body.endTime !== undefined ? { endTime: body.endTime || null, status: body.endTime ? 'ended' : 'active' } : {}),
+            ...(body.endKm !== undefined ? { endKm: parsedEndKm?.value ?? null } : {}),
+          },
+        });
       }
-    });
+
+      return transaction.workDay.update({
+        where: { id },
+        data: dataToUpdate,
+        include: { events: true, drivingSessions: { orderBy: { createdAt: 'asc' } } },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     // Calcular lastSessionKm (campo calculado, não existe no schema Prisma)
     const allSessions = workDay.drivingSessions || [];
@@ -170,6 +208,9 @@ export async function PUT(
 
     return NextResponse.json({ ...workDay, lastSessionKm });
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+      return NextResponse.json({ error: 'A jornada foi alterada simultaneamente. Atualize e tente novamente.' }, { status: 409 });
+    }
     // Tratar erro de autenticação
     if (error instanceof Error && error.message.startsWith('UNAUTHORIZED')) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });

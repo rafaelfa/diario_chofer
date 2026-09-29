@@ -11,6 +11,7 @@ export interface DrivingSession {
   startKm: number | null;
   endKm: number | null;
   status: 'active' | 'paused' | 'ended';
+  driverNumber?: 1 | 2;
   utcOffset?: string | null;
 }
 
@@ -37,6 +38,7 @@ export interface WorkDay {
   matricula: string | null;
   isPaused: boolean;
   numDrivers: number;
+  primaryDriverNumber?: 1 | 2;
   timezone?: string | null;
   utcOffset?: string | null;
   breakStart?: string | null;
@@ -61,10 +63,13 @@ export interface ReportStatistics {
   avgKmPerDay: number;
 }
 
+import type { DrivingLimitResult } from '@/lib/regulation561';
+
 export interface Report {
   period: { start: string; end: string; type: string };
   statistics: ReportStatistics;
   alerts: string[];
+  drivingLimits?: DrivingLimitResult | null;
   workDays?: WorkDay[];
 }
 

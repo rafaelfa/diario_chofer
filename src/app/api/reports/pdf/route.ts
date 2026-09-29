@@ -1,9 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { Prisma } from '@prisma/client';
 import { requireAuth } from '@/lib/auth';
-import { calcHoursWorked, calcKmTraveled, MAX_DAY_HOURS } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
 import { formatDatePtServer } from '@/lib/timezone';
+import { escapeHtml } from '@/lib/html';
+import {
+  aggregateDrivingByDate,
+  computeDrivingLimits,
+  evaluateDailyDrivingLimits,
+  getIsoWeekNumberUtc,
+  getMonday,
+  MAX_BIWEEKLY_DRIVING_H,
+  MAX_DAILY_DRIVING_EXCEPTION_H,
+  MAX_WEEKLY_DRIVING_H,
+} from '@/lib/regulation561';
+import { endOfUtcDay, isValidTimezone, parseDateOnlyUtc, startOfUtcDay } from '@/lib/validators';
+
+type ReportWorkDay = Prisma.WorkDayGetPayload<{
+  include: { events: true; drivingSessions: true };
+}>;
+
+interface ReportHtmlData {
+  periodLabel: string;
+  startDate: string;
+  endDate: string;
+  matricula: string | null;
+  timezone: string | null;
+  statistics: {
+    daysWorked: number;
+    totalKm: number;
+    totalHours: number;
+    totalEvents: number;
+    avgHoursPerDay: number;
+    avgKmPerDay: number;
+  };
+  days: Array<{
+    dateFormatted: string;
+    matricula: string;
+    startTime: string;
+    endTime: string;
+    startKm: number | string;
+    endKm: number | string;
+    kmTraveled: number;
+    hours: number;
+    startCountry: string;
+    endCountry: string;
+    events: number;
+    truckCheck: string;
+    turnosCount: number;
+    turnos: Array<{
+      numero: number;
+      startTime: string;
+      endTime: string;
+      startKm: string;
+      endKm: string;
+      km: number;
+      status: string;
+    }>;
+  }>;
+  alerts: string[];
+}
 
 // GET - Gerar relatório HTML (pode ser impresso como PDF pelo navegador) DO USUÁRIO LOGADO
 export async function GET(request: NextRequest) {
@@ -17,12 +75,20 @@ export async function GET(request: NextRequest) {
     const customStartDate = searchParams.get('startDate');
     const customEndDate = searchParams.get('endDate');
     const timezone = searchParams.get('timezone');
-    const referenceDate = searchParams.get('date') ? new Date(searchParams.get('date')!) : new Date();
+    const requestedDate = searchParams.get('date');
+    const referenceDate = requestedDate ? parseDateOnlyUtc(requestedDate) : new Date();
+
+    if (!['weekly', 'monthly', 'custom'].includes(type) || !referenceDate || !isValidTimezone(timezone)) {
+      return NextResponse.json({ error: 'Tipo, data ou fuso horário inválido' }, { status: 400 });
+    }
+    if (Boolean(customStartDate) !== Boolean(customEndDate) || (type === 'custom' && !customStartDate)) {
+      return NextResponse.json({ error: 'Informe as datas inicial e final do período' }, { status: 400 });
+    }
 
     let startDate: Date | null = null;
     let endDate: Date | null = null;
     let periodLabel: string;
-    let workDays: any[] = [];
+    let workDays: ReportWorkDay[] = [];
 
     log('=== GERANDO RELATÓRIO PDF ===');
     log('Matrícula:', matricula);
@@ -39,7 +105,7 @@ export async function GET(request: NextRequest) {
         include: {
           events: true,
           drivingSessions: {
-            orderBy: { startTime: 'asc' }
+            orderBy: { createdAt: 'asc' }
           }
         },
         orderBy: { createdAt: 'asc' }
@@ -57,17 +123,13 @@ export async function GET(request: NextRequest) {
           .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
         if (validDates.length > 0) {
-          startDate = new Date(validDates[0]);
-          startDate.setHours(0, 0, 0, 0);
-          endDate = new Date(validDates[validDates.length - 1]);
-          endDate.setHours(23, 59, 59, 999);
+          startDate = startOfUtcDay(validDates[0]);
+          endDate = endOfUtcDay(validDates[validDates.length - 1]);
         } else {
           // Se não há datas válidas, usar createdAt
           const createdDates = allVehicleRecords.map(r => r.createdAt).sort();
-          startDate = new Date(createdDates[0]);
-          startDate.setHours(0, 0, 0, 0);
-          endDate = new Date(createdDates[createdDates.length - 1]);
-          endDate.setHours(23, 59, 59, 999);
+          startDate = startOfUtcDay(createdDates[0]);
+          endDate = endOfUtcDay(createdDates[createdDates.length - 1]);
         }
 
         const startFormatted = formatDatePtServer(startDate, timezone, { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -75,18 +137,19 @@ export async function GET(request: NextRequest) {
         periodLabel = `Veículo: ${matricula.toUpperCase()} | ${startFormatted} a ${endFormatted}`;
       } else {
         // Veículo sem registros
-        startDate = new Date();
-        startDate.setHours(0, 0, 0, 0);
-        endDate = new Date();
-        endDate.setHours(23, 59, 59, 999);
+        startDate = startOfUtcDay(new Date());
+        endDate = endOfUtcDay(new Date());
         periodLabel = `Veículo: ${matricula.toUpperCase()} - Sem registros`;
       }
     } else if (customStartDate && customEndDate) {
       // Período personalizado
-      startDate = new Date(customStartDate);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(customEndDate);
-      endDate.setHours(23, 59, 59, 999);
+      startDate = parseDateOnlyUtc(customStartDate);
+      const parsedEndDate = parseDateOnlyUtc(customEndDate);
+      if (!startDate || !parsedEndDate || startDate > parsedEndDate) {
+        return NextResponse.json({ error: 'Período personalizado inválido' }, { status: 400 });
+      }
+      endDate = new Date(parsedEndDate);
+      endDate.setUTCHours(23, 59, 59, 999);
 
       const startFormatted = formatDatePtServer(startDate, timezone, { day: '2-digit', month: '2-digit' });
       const endFormatted = formatDatePtServer(endDate, timezone, { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -96,12 +159,9 @@ export async function GET(request: NextRequest) {
       }
 
       // ✅ ISOLAMENTO: Buscar dias de trabalho do usuário
-      const whereClause: any = {
+      const whereClause: Prisma.WorkDayWhereInput = {
         userId,  // ← OBRIGATÓRIO
-        OR: [
-          { date: { gte: startDate, lte: endDate } },
-          { date: null }
-        ]
+        date: { gte: startDate, lte: endDate }
       };
 
       if (matricula) {
@@ -113,47 +173,38 @@ export async function GET(request: NextRequest) {
         include: {
           events: true,
           drivingSessions: {
-            orderBy: { startTime: 'asc' }
+            orderBy: { createdAt: 'asc' }
           }
         },
         orderBy: { date: 'asc' }
       });
     } else if (type === 'weekly') {
-      const dayOfWeek = referenceDate.getDay();
-      const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      startDate = new Date(referenceDate);
-      startDate.setDate(referenceDate.getDate() - diff);
-      startDate.setHours(0, 0, 0, 0);
+      startDate = getMonday(referenceDate);
       endDate = new Date(startDate);
-      endDate.setDate(startDate.getDate() + 6);
-      endDate.setHours(23, 59, 59, 999);
+      endDate.setUTCDate(endDate.getUTCDate() + 7);
+      endDate.setUTCMilliseconds(endDate.getUTCMilliseconds() - 1);
 
-      const weekNum = Math.ceil((startDate.getDate() + new Date(startDate.getFullYear(), startDate.getMonth(), 1).getDay()) / 7);
+      const weekNum = getIsoWeekNumberUtc(startDate);
       periodLabel = `Semana ${weekNum} de ${formatDatePtServer(startDate, timezone, { month: 'long', year: 'numeric' })}`;
 
       // ✅ ISOLAMENTO: Buscar dias de trabalho do usuário
       workDays = await db.workDay.findMany({
         where: {
           userId,  // ← OBRIGATÓRIO
-          OR: [
-            { date: { gte: startDate, lte: endDate } },
-            { date: null }
-          ]
+          date: { gte: startDate, lte: endDate }
         },
         include: {
           events: true,
           drivingSessions: {
-            orderBy: { startTime: 'asc' }
+            orderBy: { createdAt: 'asc' }
           }
         },
         orderBy: { date: 'asc' }
       });
     } else {
       // Monthly
-      startDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
-      endDate.setHours(23, 59, 59, 999);
+      startDate = new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), 1));
+      endDate = new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth() + 1, 0, 23, 59, 59, 999));
 
       periodLabel = formatDatePtServer(referenceDate, timezone, { month: 'long', year: 'numeric' });
 
@@ -161,15 +212,12 @@ export async function GET(request: NextRequest) {
       workDays = await db.workDay.findMany({
         where: {
           userId,  // ← OBRIGATÓRIO
-          OR: [
-            { date: { gte: startDate, lte: endDate } },
-            { date: null }
-          ]
+          date: { gte: startDate, lte: endDate }
         },
         include: {
           events: true,
           drivingSessions: {
-            orderBy: { startTime: 'asc' }
+            orderBy: { createdAt: 'asc' }
           }
         },
         orderBy: { date: 'asc' }
@@ -188,16 +236,13 @@ export async function GET(request: NextRequest) {
       const dayKm = calcKmTraveled(day.drivingSessions || [], day.startKm, day.endKm) || 0;
       totalKm += dayKm;
 
-      // Calcular horas — centralizado em calcHoursWorked
-      // Proteção dupla: limitar a 15h por dia (ninguém conduz mais que 15h)
-      const rawDayHours = calcHoursWorked(day.drivingSessions || [], day.startTime, day.endTime) || 0;
-      const dayHours = Math.min(rawDayHours, MAX_DAY_HOURS);
+      const dayHours = calcWorkDayHours(day) ?? 0;
       totalHours += dayHours;
 
       totalEvents += day.events.length;
 
       // Formatar turnos
-      const turnos = (day.drivingSessions || []).map((session: any, index: number) => ({
+      const turnos = day.drivingSessions.map((session, index) => ({
         numero: index + 1,
         startTime: session.startTime || '--:--',
         endTime: session.endTime || '--:--',
@@ -213,8 +258,8 @@ export async function GET(request: NextRequest) {
         matricula: day.matricula || '-',
         startTime: day.startTime || '-',
         endTime: day.endTime || '-',
-        startKm: day.startKm || '-',
-        endKm: day.endKm || '-',
+        startKm: day.startKm ?? '-',
+        endKm: day.endKm ?? '-',
         kmTraveled: dayKm,
         hours: parseFloat(dayHours.toFixed(1)),
         startCountry: day.startCountry || '-',
@@ -228,20 +273,52 @@ export async function GET(request: NextRequest) {
 
     // Verificar alertas de legislação
     const alerts: string[] = [];
-    const maxDailyHours = 9;
-    const maxWeeklyHours = 56;
-
-    daysFormatted.forEach(day => {
-      if (day.hours > maxDailyHours) {
-        alerts.push(`${day.dateFormatted}: ${day.hours}h de condução (limite: ${maxDailyHours}h)`);
+    if (!matricula) {
+      const dailyTotals = aggregateDrivingByDate(workDays.flatMap(day =>
+        day.date ? [{ date: day.date, hoursWorked: calcWorkDayHours(day) ?? 0 }] : []
+      ));
+      const dailyLimits = evaluateDailyDrivingLimits(dailyTotals);
+      for (const excess of dailyLimits.overAbsoluteLimit) {
+        alerts.push(`${formatDatePtServer(excess.date, timezone)}: ${excess.hours.toFixed(1)}h de condução (limite absoluto: ${MAX_DAILY_DRIVING_EXCEPTION_H}h)`);
       }
-    });
+      for (const excess of dailyLimits.exceededWeeklyExceptions) {
+        alerts.push(`${formatDatePtServer(excess.date, timezone)}: ${excess.hours.toFixed(1)}h; já foram usadas as duas exceções semanais de 10h`);
+      }
 
-    if (type === 'weekly' && totalHours > maxWeeklyHours) {
-      alerts.push(`Total semanal: ${totalHours.toFixed(1)}h (limite: ${maxWeeklyHours}h)`);
+      if (type === 'weekly' && startDate && endDate) {
+        const previousWeekStart = new Date(startDate);
+        previousWeekStart.setUTCDate(previousWeekStart.getUTCDate() - 7);
+        const complianceDays = await db.workDay.findMany({
+          where: { userId, date: { gte: previousWeekStart, lte: endDate } },
+          select: {
+            date: true,
+            startTime: true,
+            endTime: true,
+            primaryDriverNumber: true,
+            utcOffset: true,
+            breakMinutes: true,
+            breakStart: true,
+            drivingSessions: { orderBy: { createdAt: 'asc' } },
+          },
+        });
+        const limits = computeDrivingLimits(
+          complianceDays.filter(day => day.date).map(day => ({
+            date: day.date as Date,
+            hoursWorked: calcWorkDayHours(day) ?? 0,
+          })),
+          referenceDate
+        );
+        if (limits.weeklyHours > MAX_WEEKLY_DRIVING_H) {
+          alerts.push(`Total semanal: ${limits.weeklyHours.toFixed(1)}h (limite: ${MAX_WEEKLY_DRIVING_H}h)`);
+        }
+        if (limits.biweeklyHours > MAX_BIWEEKLY_DRIVING_H) {
+          alerts.push(`Total em duas semanas: ${limits.biweeklyHours.toFixed(1)}h (limite: ${MAX_BIWEEKLY_DRIVING_H}h)`);
+        }
+      }
     }
 
     // Preparar dados para o relatório
+    const daysWorked = new Set(workDays.map(day => (day.date ?? day.createdAt).toISOString().slice(0, 10))).size;
     const reportData = {
       periodLabel,
       type,
@@ -250,12 +327,12 @@ export async function GET(request: NextRequest) {
       matricula,
       timezone,  // Passar timezone para formatação no HTML
       statistics: {
-        daysWorked: workDays.length,
+        daysWorked,
         totalKm,
         totalHours: parseFloat(totalHours.toFixed(1)),
         totalEvents,
-        avgHoursPerDay: workDays.length > 0 ? parseFloat((totalHours / workDays.length).toFixed(1)) : 0,
-        avgKmPerDay: workDays.length > 0 ? Math.round(totalKm / workDays.length) : 0
+        avgHoursPerDay: daysWorked > 0 ? parseFloat((totalHours / daysWorked).toFixed(1)) : 0,
+        avgKmPerDay: daysWorked > 0 ? Math.round(totalKm / daysWorked) : 0,
       },
       days: daysFormatted,
       alerts
@@ -279,7 +356,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-function generateReportHTML(data: any): string {
+function generateReportHTML(data: ReportHtmlData): string {
   const { periodLabel, startDate, endDate, matricula, statistics, days, alerts, timezone } = data;
 
   return `<!DOCTYPE html>
@@ -522,9 +599,9 @@ function generateReportHTML(data: any): string {
   <p style="color: #64748b; text-align: center; margin-bottom: 15px;">Relatório de Jornada de Trabalho</p>
   
   <div class="period">
-    <strong>Período:</strong> ${periodLabel}<br>
-    <strong>De:</strong> ${startDate} <strong>até</strong> ${endDate}
-    ${matricula ? `<br><strong>Veículo:</strong> ${matricula}` : ''}
+    <strong>Período:</strong> ${escapeHtml(periodLabel)}<br>
+    <strong>De:</strong> ${escapeHtml(startDate)} <strong>até</strong> ${escapeHtml(endDate)}
+    ${matricula ? `<br><strong>Veículo:</strong> ${escapeHtml(matricula)}` : ''}
   </div>
 
   <h2>📊 Resumo do Período</h2>
@@ -563,12 +640,12 @@ function generateReportHTML(data: any): string {
 
   <h2>📋 Detalhamento Diário com Turnos</h2>
   
-  ${days.length > 0 ? days.map((d: any) => `
+  ${days.length > 0 ? days.map((d) => `
   <div class="day-section">
     <div class="day-header">
       <h3>📅 ${d.dateFormatted}</h3>
       <div>
-        ${d.matricula !== '-' ? `<span style="margin-right: 12px;">🚛 ${d.matricula}</span>` : ''}
+        ${d.matricula !== '-' ? `<span style="margin-right: 12px;">🚛 ${escapeHtml(d.matricula)}</span>` : ''}
         <span class="badge">${d.turnosCount} turno${d.turnosCount > 1 ? 's' : ''} | ${d.kmTraveled} km | ${d.hours}h</span>
       </div>
     </div>
@@ -576,13 +653,13 @@ function generateReportHTML(data: any): string {
     <div class="day-info">
       <div class="day-info-item">
         <div class="label">Início</div>
-        <div class="value">${d.startTime}</div>
-        <div class="label">${d.startCountry}</div>
+        <div class="value">${escapeHtml(d.startTime)}</div>
+        <div class="label">${escapeHtml(d.startCountry)}</div>
       </div>
       <div class="day-info-item">
         <div class="label">Fim</div>
-        <div class="value">${d.endTime}</div>
-        <div class="label">${d.endCountry}</div>
+        <div class="value">${escapeHtml(d.endTime)}</div>
+        <div class="label">${escapeHtml(d.endCountry)}</div>
       </div>
       <div class="day-info-item">
         <div class="label">KM Percorrido</div>
@@ -610,11 +687,11 @@ function generateReportHTML(data: any): string {
           </tr>
         </thead>
         <tbody>
-          ${d.turnos.map((t: any) => `
+          ${d.turnos.map((t) => `
           <tr>
             <td><strong>${t.numero}</strong></td>
-            <td>${t.startTime}</td>
-            <td>${t.endTime}</td>
+            <td>${escapeHtml(t.startTime)}</td>
+            <td>${escapeHtml(t.endTime)}</td>
             <td>${t.startKm}</td>
             <td>${t.endKm}</td>
             <td><strong>${t.km} km</strong></td>

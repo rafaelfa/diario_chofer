@@ -1,0 +1,2 @@
+ALTER TABLE "work_days"
+ADD COLUMN IF NOT EXISTS "primary_driver_number" INTEGER NOT NULL DEFAULT 1;

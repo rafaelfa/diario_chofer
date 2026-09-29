@@ -187,7 +187,7 @@ export function ReportsView({
                         </div>
                         <div className="flex items-center justify-between text-xs">
                           <span>{h.startCountry || '--'} → {h.endCountry || '--'}</span>
-                          <span className="font-semibold">{h.kmTraveled || '--'} km</span>
+                          <span className="font-semibold">{h.kmTraveled ?? '--'} km</span>
                         </div>
                       </div>
                     ))}
@@ -266,6 +266,22 @@ export function ReportsView({
                   <span>Descanso diário</span>
                   <Badge>11h (9h 3x/semana)</Badge>
                 </div>
+                {weeklyReport?.drivingLimits && (
+                  <>
+                    <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                      <span>Condução nesta semana</span>
+                      <Badge variant={weeklyReport.drivingLimits.weeklyStatus === 'danger' ? 'destructive' : 'outline'}>
+                        {weeklyReport.drivingLimits.weeklyHours.toFixed(1)}h / 56h
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                      <span>Condução em duas semanas</span>
+                      <Badge variant={weeklyReport.drivingLimits.biweeklyStatus === 'danger' ? 'destructive' : 'outline'}>
+                        {weeklyReport.drivingLimits.biweeklyHours.toFixed(1)}h / 90h
+                      </Badge>
+                    </div>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>

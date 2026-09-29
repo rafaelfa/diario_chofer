@@ -10,7 +10,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Trash2 } from 'lucide-react';
-import type { WorkDay } from '@/lib/types';
 import { useWorkDays } from '@/hooks/useWorkDays';
 import { useReports } from '@/hooks/useReports';
 import { useDiarioActions } from '@/hooks/useDiarioActions';
@@ -50,7 +49,7 @@ export default function DiarioMotorista() {
     breakState,
     breakMinutes,
     conformity, workingTime,
-    isStarting, isEnding, isSaving,
+    isStarting, isEnding,
     handleStartDay, handleEndDay, handleAddEvent,
     handlePauseDriving, handleResumeDriving, handleOpenPauseDialog, handleConfirmResume,
     handleStartBreak, handleEndBreak,
@@ -110,7 +109,6 @@ export default function DiarioMotorista() {
             lastKmInfo={lastKmInfo}
             setLastKmInfo={setLastKmInfo}
             checkingMatricula={checkingMatricula}
-            gpsCountry={actions.gpsCountry}
             loadingGps={loadingGps}
             gpsError={gpsError}
             getLocation={getLocation}
@@ -120,13 +118,11 @@ export default function DiarioMotorista() {
             onStartDay={handleStartDay}
             onEndDay={handleEndDay}
             onAddEvent={handleAddEvent}
-            onPauseDriving={handlePauseDriving}
             onResumeDriving={handleResumeDriving}
             onOpenPauseDialog={handleOpenPauseDialog}
             onLoadWorkDays={loadWorkDays}
             isStarting={isStarting}
             isEnding={isEnding}
-            isSaving={isSaving}
             breakState={breakState}
             breakMinutes={breakMinutes}
             onOpenBreak={handleOpenBreak}

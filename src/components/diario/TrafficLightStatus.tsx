@@ -23,12 +23,6 @@ export function TrafficLightStatus({
   const isAlert = status === 'warning';
   const isDanger = status === 'danger';
 
-  const getLightColor = () => {
-    if (isDanger) return 'bg-red-500 shadow-red-500/50';
-    if (isAlert) return 'bg-amber-500 shadow-amber-500/50';
-    return 'bg-emerald-500 shadow-emerald-500/50';
-  };
-
   // Formatar pausas
   const breakHours = Math.floor(breakMinutes / 60);
   const breakMins = breakMinutes % 60;

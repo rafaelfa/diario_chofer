@@ -1,0 +1,2 @@
+ALTER TABLE "driving_sessions"
+ADD COLUMN IF NOT EXISTS "driver_number" INTEGER NOT NULL DEFAULT 1;

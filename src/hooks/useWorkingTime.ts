@@ -13,11 +13,11 @@
 
 import { useCallback } from 'react';
 import type { WorkDay } from '@/lib/types';
-import { parseTimeToMinutes, minutesToFormatted } from '@/lib/time';
-import { formatDatePt } from '@/lib/timezone';
+import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
+import { formatDatePt, getLocalTimeString } from '@/lib/timezone';
 import type { ConformityStatus, WorkingTimeResult, BreakState } from './useDiarioActions';
 
-export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakState) {
+export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakState, now: Date | null = null) {
   const formatTime = (time: string | null) => time || '--:--';
 
   const formatDate = (dateStr: string) => {
@@ -31,66 +31,28 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
    *   - Pausa activa em curso (se houver)
    */
   const getBreakMinutes = useCallback((): number => {
-    if (!breakState) return 0;
+    let total = breakState?.completedBreakMinutes ?? currentDay?.breakMinutes ?? 0;
 
-    let total = breakState.completedBreakMinutes || 0;
-
-    // Se há uma pausa activa, somar o tempo desde o início até agora
-    if (breakState.isActive && breakState.startTime) {
-      const elapsed = Math.floor((Date.now() - breakState.startTime.getTime()) / 60000);
+    if (breakState?.isActive && breakState.startTime && now) {
+      const elapsed = Math.floor((now.getTime() - breakState.startTime.getTime()) / 60000);
       total += Math.max(elapsed, 0);
     }
 
-    return total;
-  }, [breakState]);
+    return Math.max(total, 0);
+  }, [breakState, currentDay?.breakMinutes, now]);
 
   const calculateWorkingTime = useCallback((): WorkingTimeResult => {
     if (!currentDay?.startTime) return { hours: 0, minutes: 0, formatted: '0:00', totalMinutes: 0 };
 
-    const sessions = currentDay.drivingSessions || [];
-    const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    let totalMinutes = 0;
-
-    for (const session of sessions) {
-     // No modo 2 motoristas, as pausas/paradas da equipa NÃO contam como
-    // condução individual — somamos apenas sessões efetivamente conduzidas
-    // e nunca ultrapassamos o relógio (sessão ativa = agora - início).
-    for (const session of sessions) {
-      const sessionStart = parseTimeToMinutes(session.startTime);
-      if (sessionStart === null) continue;
-
-      if (session.endTime) {
-        const sessionEnd = parseTimeToMinutes(session.endTime);
-        if (sessionEnd !== null) {
-          let diff = sessionEnd - sessionStart;
-          if (diff < 0) diff += 24 * 60;
-          totalMinutes += diff;
-        }
-      } else {
-        let diff = nowMinutes - sessionStart;
-        if (diff < 0) diff += 24 * 60;
-        totalMinutes += diff;
-      }
-    }
-
-    if (totalMinutes === 0) {
-      // Fallback: usar startTime → agora (tempo total decorrido)
-      const startMin = parseTimeToMinutes(currentDay.startTime);
-      if (startMin !== null) {
-        let diff = nowMinutes - startMin;
-        if (diff < 0) diff += 24 * 60;
-        totalMinutes = diff;
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // SUBTRAIR TEMPO DE PAUSA (Reg. CE 561/2006)
-    // O tempo de pausa NÃO conta como tempo de condução.
-    // Isto aplica-se ao cálculo das 9h diárias de condução.
-    // ═══════════════════════════════════════════════════════════════
-    const breakMinutes = getBreakMinutes();
-    const drivingMinutes = Math.max(0, totalMinutes - breakMinutes);
+    const sessions = (currentDay.drivingSessions || []).filter(
+      session => (session.driverNumber ?? 1) === (currentDay.primaryDriverNumber ?? 1)
+    );
+    const drivingMinutes = calcDrivingMinutes(
+      sessions,
+      currentDay.startTime,
+      currentDay.endTime,
+      { currentTime: now ? getLocalTimeString(now) : undefined, breakMinutes: getBreakMinutes() }
+    ) ?? 0;
 
     return {
       hours: Math.floor(drivingMinutes / 60),
@@ -98,7 +60,7 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
       formatted: minutesToFormatted(drivingMinutes),
       totalMinutes: drivingMinutes,
     };
-  }, [currentDay, getBreakMinutes]);
+  }, [currentDay, getBreakMinutes, now]);
 
   const getConformityStatus = useCallback((): ConformityStatus => {
     if (!currentDay?.startTime) return { status: 'ok', message: '' };
@@ -128,6 +90,7 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
 
   return {
     calculateWorkingTime,
+    getBreakMinutes,
     getConformityStatus,
     formatTime,
     formatDate,

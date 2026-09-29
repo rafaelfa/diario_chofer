@@ -14,6 +14,22 @@ interface Coordinates {
   longitude: number;
 }
 
+function getCountryFallback(coords: Coordinates): string {
+  const { latitude, longitude } = coords;
+
+  if (latitude >= 36.9 && latitude <= 42.2 && longitude >= -9.5 && longitude <= -6.2) return 'Portugal';
+  if (latitude >= 36.5 && latitude <= 40 && longitude >= -31.5 && longitude <= -24.5) return 'Portugal';
+  if (latitude >= 32.2 && latitude <= 33.2 && longitude >= -17.3 && longitude <= -16.2) return 'Portugal';
+  if (latitude >= 35.9 && latitude <= 43.8 && longitude >= -9.3 && longitude <= 4.4) return 'Espanha';
+  if (latitude >= 42.3 && latitude <= 51.1 && longitude >= -4.8 && longitude <= 8.2) return 'França';
+  if (latitude >= 47.3 && latitude <= 55.1 && longitude >= 5.9 && longitude <= 15.0) return 'Alemanha';
+  if (latitude >= 35.5 && latitude <= 47.1 && longitude >= 6.6 && longitude <= 18.5) return 'Itália';
+  if (latitude >= 49.5 && latitude <= 51.5 && longitude >= 2.5 && longitude <= 6.4) return 'Bélgica';
+  if (latitude >= 50.8 && latitude <= 53.5 && longitude >= 3.4 && longitude <= 7.2) return 'Holanda';
+  if (latitude >= 49.0 && latitude <= 54.9 && longitude >= 14.1 && longitude <= 24.2) return 'Polônia';
+  return 'Desconhecido';
+}
+
 export function useGeolocation() {
   const [result, setResult] = useState<LocationResult>({
     country: '',
@@ -45,53 +61,6 @@ export function useGeolocation() {
     }
   }, []);
 
-  const getCountryFallback = (coords: Coordinates): string => {
-    const { latitude, longitude } = coords;
-    
-    // Portugal continental
-    if (latitude >= 36.9 && latitude <= 42.2 && longitude >= -9.5 && longitude <= -6.2) {
-      return 'Portugal';
-    }
-    // Açores
-    if (latitude >= 36.5 && latitude <= 40 && longitude >= -31.5 && longitude <= -24.5) {
-      return 'Portugal';
-    }
-    // Madeira
-    if (latitude >= 32.2 && latitude <= 33.2 && longitude >= -17.3 && longitude <= -16.2) {
-      return 'Portugal';
-    }
-    // Espanha
-    if (latitude >= 35.9 && latitude <= 43.8 && longitude >= -9.3 && longitude <= 4.4) {
-      return 'Espanha';
-    }
-    // França
-    if (latitude >= 42.3 && latitude <= 51.1 && longitude >= -4.8 && longitude <= 8.2) {
-      return 'França';
-    }
-    // Alemanha
-    if (latitude >= 47.3 && latitude <= 55.1 && longitude >= 5.9 && longitude <= 15.0) {
-      return 'Alemanha';
-    }
-    // Itália
-    if (latitude >= 35.5 && latitude <= 47.1 && longitude >= 6.6 && longitude <= 18.5) {
-      return 'Itália';
-    }
-    // Bélgica
-    if (latitude >= 49.5 && latitude <= 51.5 && longitude >= 2.5 && longitude <= 6.4) {
-      return 'Bélgica';
-    }
-    // Holanda
-    if (latitude >= 50.8 && latitude <= 53.5 && longitude >= 3.4 && longitude <= 7.2) {
-      return 'Holanda';
-    }
-    // Polônia
-    if (latitude >= 49.0 && latitude <= 54.9 && longitude >= 14.1 && longitude <= 24.2) {
-      return 'Polônia';
-    }
-    
-    return 'Desconhecido';
-  };
-
   const getLocation = useCallback(async (): Promise<LocationResult> => {
     setResult({ country: '', loading: true, error: null });
     
@@ -115,7 +84,7 @@ export function useGeolocation() {
             const result = { country, loading: false, error: null };
             setResult(result);
             resolve(result);
-          } catch (error) {
+          } catch {
             const result = { country: '', loading: false, error: 'Erro ao identificar país' };
             setResult(result);
             resolve(result);

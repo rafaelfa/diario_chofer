@@ -70,7 +70,9 @@ export function MatriculaPlateInput({ value, onChange, onComplete }: MatriculaPl
   // efeito, cada tecla recriaria a closure no pai e dispararia foco em outro campo no
   // meio da digitação (bug: "primeiro quadro não aceita número").
   const onCompleteRef = useRef(onComplete);
-  onCompleteRef.current = onComplete;
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
   const completeNotified = useRef(false);
   useEffect(() => {
     const isComplete = parts.every((p) => p.length === 2);

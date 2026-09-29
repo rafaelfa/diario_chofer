@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUser, createSession } from '@/lib/auth';
-import { checkRateLimit, resetRateLimit, getClientIp } from '@/lib/rate-limit';
+import { AUTH_RATE_LIMITS, checkRateLimit, resetRateLimit, getClientIp } from '@/lib/rate-limit';
 import { logError } from '@/lib/logger';
 
 // POST - Login com Rate Limiting
@@ -8,11 +8,11 @@ export async function POST(request: NextRequest) {
   try {
     // ✅ RATE LIMITING: Verificar limite de tentativas por IP
     const clientIp = getClientIp(request);
-    const rateLimitResult = checkRateLimit(clientIp, 5, 15 * 60 * 1000); // 5 tentativas em 15 min
+    const rateLimitResult = await checkRateLimit(`login:${clientIp}`, AUTH_RATE_LIMITS.login.maxAttempts, AUTH_RATE_LIMITS.login.windowMs);
 
     // Headers de rate limit para o cliente
     const rateLimitHeaders = {
-      'X-RateLimit-Limit': '5',
+      'X-RateLimit-Limit': AUTH_RATE_LIMITS.login.maxAttempts.toString(),
       'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
       'X-RateLimit-Reset': rateLimitResult.resetTime.toString(),
     };
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ✅ Sucesso no login: resetar o rate limit para este IP
-    resetRateLimit(clientIp);
+    await resetRateLimit(`login:${clientIp}`);
 
     // Criar sessão
     await createSession(result.userId!, result.username!);

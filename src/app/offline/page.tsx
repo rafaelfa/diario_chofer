@@ -18,12 +18,12 @@ export default function OfflinePage() {
           <p className="text-muted-foreground">
             Você está offline no momento. Algumas funcionalidades podem não estar disponíveis.
           </p>
-          <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg text-sm">
-            <p className="font-medium text-emerald-700 dark:text-emerald-300 mb-2">
-              ✅ Dados salvos localmente
+          <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-lg text-sm">
+            <p className="font-medium text-amber-700 dark:text-amber-300 mb-2">
+              Alterações não foram salvas
             </p>
             <p className="text-muted-foreground">
-              Suas alterações serão sincronizadas automaticamente quando a conexão for restaurada.
+              Conecte-se novamente antes de registrar jornadas ou eventos.
             </p>
           </div>
           <Button 

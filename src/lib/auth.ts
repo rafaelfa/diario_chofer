@@ -13,12 +13,21 @@ const getSecretKey = () => {
   return new TextEncoder().encode(secret);
 };
 
+/** Validade da sessão reduzida para 24h (mitiga JWT não revogável). */
+const SESSION_MAX_AGE_S = 60 * 60 * 24;
+
 // Criar hash da senha
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
 }
 
-// Verificar senha
+/**
+ * Verifica senha com tempo constante: mesmo que o usuário não exista,
+ * executa uma comparação bcrypt contra um hash dummy, evitando que um
+ * atacante diferencie "usuário existe" de "senha errada" por timing.
+ */
+const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 12);
+
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
 }
@@ -29,16 +38,24 @@ export async function createToken(payload: { userId: string; username: string })
   return new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime('7d') // Token válido por 7 dias
+    .setExpirationTime(`${SESSION_MAX_AGE_S}s`)
     .sign(secret);
 }
 
-// Verificar token JWT
-export async function verifyToken(token: string): Promise<{ userId: string; username: string } | null> {
+interface TokenPayload {
+  userId: string;
+  username: string;
+}
+
+// Verificar token JWT (com validação de claims em runtime, sem cast cego)
+export async function verifyToken(token: string): Promise<(TokenPayload & { iat?: number }) | null> {
   try {
     const secret = getSecretKey();
     const { payload } = await jwtVerify(token, secret);
-    return payload as { userId: string; username: string };
+    const userId = payload.userId;
+    const username = payload.username;
+    if (typeof userId !== 'string' || typeof username !== 'string') return null;
+    return { userId, username, iat: payload.iat };
   } catch {
     return null;
   }
@@ -53,7 +70,7 @@ export async function createSession(userId: string, username: string): Promise<v
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7, // 7 dias
+    maxAge: SESSION_MAX_AGE_S,
     path: '/',
   });
 }
@@ -65,7 +82,21 @@ export async function getSession(): Promise<{ userId: string; username: string }
 
   if (!token) return null;
 
-  return verifyToken(token);
+  const session = await verifyToken(token);
+  if (!session) return null;
+
+  // Revogação de sessão: tokens emitidos antes da última atualização de senha
+  // (updatedAt do usuário) são considerados inválidos.
+  const user = await db.appUser.findUnique({
+    where: { id: session.userId },
+    select: { updatedAt: true },
+  });
+  if (!user) return null;
+  if (session.iat && Math.floor(user.updatedAt.getTime() / 1000) > session.iat) {
+    return null; // credenciais alteradas após a emissão do token
+  }
+
+  return { userId: session.userId, username: session.username };
 }
 
 // Destruir sessão (logout)
@@ -148,25 +179,39 @@ export async function createUser(username: string, password: string, name?: stri
 export const createFirstUser = createUser;
 
 // Autenticar usuário
+// SEGURANÇA: mensagens unificadas ("Credenciais inválidas") + verificação de
+// tempo constante para evitar enumeração de usuários por timing.
 export async function authenticateUser(username: string, password: string): Promise<{ success: boolean; userId?: string; username?: string; error?: string }> {
   try {
     const user = await db.appUser.findUnique({
       where: { username },
     });
 
-    if (!user) {
-      return { success: false, error: 'Usuário não encontrado' };
-    }
+    const hash = user ? user.passwordHash : DUMMY_HASH;
+    const isValid = await verifyPassword(password, hash);
 
-    const isValid = await verifyPassword(password, user.passwordHash);
-
-    if (!isValid) {
-      return { success: false, error: 'Senha incorreta' };
+    if (!user || !isValid) {
+      return { success: false, error: 'Credenciais inválidas' };
     }
 
     return { success: true, userId: user.id, username: user.username };
   } catch (error) {
     logError('Erro ao autenticar:', error);
-    return { success: false, error: 'Erro ao autenticar' };
+    return { success: false, error: 'Credenciais inválidas' };
+  }
+}
+
+/**
+ * Proteção CSRF para rotas de API mutantes (POST/PUT/PATCH/DELETE).
+ * Navegadores enviam o header Origin em requisições cross-origin com cookies;
+ * se a origem não bater com o host da requisição, a mutação é rejeitada.
+ */
+export function isCsrfSafe(request: Request): boolean {
+  const origin = request.headers.get('origin');
+  if (!origin) return true; // requisições não-navegador (curl, apps nativos)
+  try {
+    return new URL(origin).host === new URL(request.url).host;
+  } catch {
+    return false;
   }
 }

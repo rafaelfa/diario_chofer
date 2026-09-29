@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, isCsrfSafe} from '@/lib/auth';
 import { calcKmTraveled } from '@/lib/time';
 import { logError } from '@/lib/logger';
 import { isValidTimeString, parseNonNegativeInteger } from '@/lib/validators';
@@ -58,6 +58,10 @@ export async function GET(request: NextRequest) {
 // POST - Pausar sessão atual ou criar nova sessão (retomar) DO USUÁRIO LOGADO
 export async function POST(request: NextRequest) {
   try {
+    if (!isCsrfSafe(request)) {
+      return NextResponse.json({ error: 'Requisição bloqueada (origem inválida)' }, { status: 403 });
+    }
+
     // ✅ ISOLAMENTO: Verificar autenticação
     const { userId } = await requireAuth();
 

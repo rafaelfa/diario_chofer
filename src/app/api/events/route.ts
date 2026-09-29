@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, isCsrfSafe} from '@/lib/auth';
 import { logError } from '@/lib/logger';
 import { isValidTimeString } from '@/lib/validators';
 
@@ -46,6 +46,10 @@ export async function GET(request: NextRequest) {
 // POST - Criar novo evento (associado ao usuário logado)
 export async function POST(request: NextRequest) {
   try {
+    if (!isCsrfSafe(request)) {
+      return NextResponse.json({ error: 'Requisição bloqueada (origem inválida)' }, { status: 403 });
+    }
+
     // ✅ ISOLAMENTO: Verificar autenticação
     const { userId } = await requireAuth();
 

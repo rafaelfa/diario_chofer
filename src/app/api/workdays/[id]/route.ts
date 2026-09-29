@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, isCsrfSafe } from '@/lib/auth';
 import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
 import { isValidTimeString, parseNonNegativeInteger, validateMatricula } from '@/lib/validators';
@@ -75,6 +75,9 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!isCsrfSafe(request)) {
+    return NextResponse.json({ error: 'Requisição bloqueada (origem inválida)' }, { status: 403 });
+  }
   try {
     // ✅ ISOLAMENTO: Verificar autenticação
     const { userId } = await requireAuth();
@@ -225,6 +228,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!isCsrfSafe(request)) {
+    return NextResponse.json({ error: 'Requisição bloqueada (origem inválida)' }, { status: 403 });
+  }
   try {
     // ✅ ISOLAMENTO: Verificar autenticação
     const { userId } = await requireAuth();

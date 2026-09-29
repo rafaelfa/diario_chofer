@@ -1,11 +1,6 @@
+# Dependencies
 node_modules/
-.next/
-out/
-build/
-dist/
-coverage/
-.vercel/
-*.log
-*.tsbuildinfo
-.env*
-!.env.example
+
+# Environment
+.env
+.env.local

@@ -1,10 +1,13 @@
-import { NextResponse } from 'next/server';
-import { destroySession } from '@/lib/auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { destroySession, isCsrfSafe } from '@/lib/auth';
 import { logError } from '@/lib/logger';
 
 // POST - Logout (destroy session)
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
+    if (!isCsrfSafe(request)) {
+      return NextResponse.json({ error: 'Requisição bloqueada (origem inválida)' }, { status: 403 });
+    }
     await destroySession();
     return NextResponse.json({ success: true });
   } catch (error) {

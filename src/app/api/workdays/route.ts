@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, isCsrfSafe} from '@/lib/auth';
 import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
 import { isValidTimeString, parseDateOnlyUtc, parseNonNegativeInteger, validateMatricula } from '@/lib/validators';
@@ -68,6 +68,10 @@ export async function GET(request: NextRequest) {
 // POST — Criar novo dia de trabalho
 export async function POST(request: NextRequest) {
   try {
+    if (!isCsrfSafe(request)) {
+      return NextResponse.json({ error: 'Requisição bloqueada (origem inválida)' }, { status: 403 });
+    }
+
     const { userId } = await requireAuth();
     const body = await request.json();
 

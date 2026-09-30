@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build && node scripts/prepare-standalone.mjs",
+    "build": "prisma migrate deploy && next build && node scripts/prepare-standalone.mjs",
     "start": "node .next/standalone/server.js",
     "lint": "eslint .",
     "test": "tsx --test src/lib/time.test.ts src/lib/regulation561.test.ts src/lib/timezone.test.ts",

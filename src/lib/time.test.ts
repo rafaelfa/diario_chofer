@@ -9,6 +9,10 @@ import {
   getTimeAtUtcOffset,
   getTotalBreakMinutes,
   parseTimeToMinutes,
+  parseStoredBreakBlocks,
+  continuousDrivingSinceLastValidBreak,
+  buildAbsoluteSessions,
+  getContinuousDrivingInfo,
 } from './time.ts';
 
 test('parseTimeToMinutes accepts valid 24-hour times only', () => {
@@ -80,4 +84,91 @@ test('getTotalBreakMinutes includes elapsed active break time', () => {
     getTotalBreakMinutes(15, new Date('2026-09-28T10:00:00.000Z'), new Date('2026-09-28T11:40:00.000Z')),
     115
   );
+});
+// ─── v4.1.8: renovação dos 4h30 (condução contínua, Reg. CE 561/2006 Art. 7) ──
+
+test('parseStoredBreakBlocks accepts JSON string or array and drops invalid blocks', () => {
+  const valid = { start: '2026-10-01T10:00:00.000Z', end: '2026-10-01T10:45:00.000Z', minutes: 45 };
+  assert.deepEqual(parseStoredBreakBlocks(JSON.stringify([valid])), [valid]);
+  assert.deepEqual(parseStoredBreakBlocks([valid, valid]), [valid]); // dedupe
+  assert.deepEqual(parseStoredBreakBlocks('not json'), []);
+  assert.deepEqual(parseStoredBreakBlocks(null), []);
+  assert.deepEqual(parseStoredBreakBlocks([{ ...valid, minutes: 0 }]), []);
+  assert.deepEqual(parseStoredBreakBlocks([{ start: valid.end, end: valid.start, minutes: 45 }]), []);
+});
+
+test('continuousDrivingSinceLastValidBreak resets on a valid 45min break', () => {
+  const day = '2026-10-01';
+  const sessions = [
+    { start: new Date(`${day}T05:00:00.000Z`), end: new Date(`${day}T09:30:00.000Z`) }, // 4h30
+    { start: new Date(`${day}T10:30:00.000Z`), end: new Date(`${day}T12:00:00.000Z`) }, // +1h30 após pausa
+  ];
+  const blocks = [{ start: `${day}T09:30:00.000Z`, end: `${day}T10:15:00.000Z`, minutes: 45 }];
+  assert.equal(continuousDrivingSinceLastValidBreak(sessions, blocks, new Date('2026-10-01T12:00:00.000Z')), 90);
+});
+
+test('a 15+30 pair within 75min renews the counter, isolated 15min does not', () => {
+  const day = '2026-10-01';
+  const sessions = [
+    { start: new Date(`${day}T05:00:00.000Z`), end: new Date(`${day}T07:30:00.000Z`) }, // 2h30
+    { start: new Date(`${day}T09:00:00.000Z`), end: new Date(`${day}T11:00:00.000Z`) }, // 2h
+  ];
+  // Par 15+30 com intervalo de 15min entre blocos (dentro de ≤75min) → válido
+  const pair = [
+    { start: `${day}T07:30:00.000Z`, end: `${day}T07:45:00.000Z`, minutes: 15 },
+    { start: `${day}T08:00:00.000Z`, end: `${day}T08:30:00.000Z`, minutes: 30 },
+  ];
+  assert.equal(continuousDrivingSinceLastValidBreak(sessions, pair, new Date('2026-10-01T11:00:00.000Z')), 120);
+  // Apenas 15min isolados → NÃO renova: acumula 2h30 + 2h = 4h30
+  assert.equal(
+    continuousDrivingSinceLastValidBreak(sessions, [pair[0]], new Date('2026-10-01T11:00:00.000Z')),
+    270
+  );
+});
+
+test('multiple valid breaks renew repeatedly (4h30→break→3h30 totals 8h)', () => {
+  const day = '2026-10-01';
+  const sessions = [
+    { start: new Date(`${day}T05:00:00.000Z`), end: new Date(`${day}T09:30:00.000Z`) }, // 4h30
+    { start: new Date(`${day}T10:15:00.000Z`), end: new Date(`${day}T12:00:00.000Z`) }, // 1h45
+  ];
+  const blocks = [
+    { start: `${day}T09:30:00.000Z`, end: `${day}T10:15:00.000Z`, minutes: 45 },
+  ];
+  // Última pausa válida às 10:15 → contínuo = 1h45
+  assert.equal(continuousDrivingSinceLastValidBreak(sessions, blocks, new Date('2026-10-01T12:00:00.000Z')), 105);
+});
+
+test('buildAbsoluteSessions converts HH:MM with utcOffset to absolute dates', () => {
+  const sessions = buildAbsoluteSessions(
+    '2026-10-01',
+    [{ startTime: '08:00', endTime: '12:30', utcOffset: '+01:00' }],
+    '+01:00'
+  );
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].start.toISOString(), '2026-10-01T07:00:00.000Z');
+  assert.equal(sessions[0].end?.toISOString(), '2026-10-01T11:30:00.000Z');
+});
+
+test('getContinuousDrivingInfo reports warning/exceeded states', () => {
+  const workDay = {
+    date: '2026-10-01',
+    utcOffset: '+00:00',
+    drivingSessions: [{ startTime: '05:00', endTime: '09:15', status: 'paused', driverNumber: 1 }],
+    breakBlocks: [],
+  };
+  const info = getContinuousDrivingInfo(workDay, { now: new Date('2026-10-01T09:15:00.000Z') });
+  assert.equal(info.continuousMinutes, 255);
+  assert.equal(info.remainingMinutes, 15);
+  assert.equal(info.warning, true);
+  assert.equal(info.exceeded, false);
+  assert.equal(info.limitMinutes, 270);
+
+  const over = getContinuousDrivingInfo(
+    { ...workDay, drivingSessions: [{ startTime: '05:00', endTime: '10:00', status: 'paused', driverNumber: 1 }] },
+    { now: new Date('2026-10-01T10:00:00.000Z') }
+  );
+  assert.equal(over.continuousMinutes, 300);
+  assert.equal(over.exceeded, true);
+  assert.equal(over.remainingMinutes, 0);
 });

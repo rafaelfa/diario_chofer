@@ -344,7 +344,7 @@ export function buildAbsoluteSessions(
     if (match && Number(match[2]) <= 14 && Number(match[3]) <= 59) {
       offsetMinutes = (match[1] === '+' ? 1 : -1) * (Number(match[2]) * 60 + Number(match[3]));
     }
-    let ms = baseUtc + minutes * 60000 - offsetMinutes * 60000;
+    const ms = baseUtc + minutes * 60000 - offsetMinutes * 60000;
     // passagem de meia-noite: sessão que termina "antes" de ter começado ⇒ dia seguinte
     return ms;
   };

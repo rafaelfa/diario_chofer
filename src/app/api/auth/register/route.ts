@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser } from '@/lib/auth';
+import { createUser, isCsrfSafe} from '@/lib/auth';
 import { logError } from '@/lib/logger';
 import { AUTH_RATE_LIMITS, checkRateLimit, getClientIp } from '@/lib/rate-limit';
 
 // POST - Criar novo usuário
 export async function POST(request: NextRequest) {
   try {
+    if (!isCsrfSafe(request)) {
+      return NextResponse.json({ error: 'Requisição bloqueada (origem inválida)' }, { status: 403 });
+    }
+
     const clientIp = getClientIp(request);
     const rateLimit = await checkRateLimit(`register:${clientIp}`, AUTH_RATE_LIMITS.register.maxAttempts, AUTH_RATE_LIMITS.register.windowMs);
     if (!rateLimit.success) {

@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateUser, createSession } from '@/lib/auth';
+import { authenticateUser, createSession, isCsrfSafe } from '@/lib/auth';
 import { AUTH_RATE_LIMITS, checkRateLimit, resetRateLimit, getClientIp } from '@/lib/rate-limit';
 import { logError } from '@/lib/logger';
 
-// POST - Login com Rate Limiting
+// POST - Login com Rate Limiting (por IP + por username) e proteção CSRF
 export async function POST(request: NextRequest) {
   try {
+    if (!isCsrfSafe(request)) {
+      return NextResponse.json({ error: 'Requisição bloqueada (origem inválida)' }, { status: 403 });
+    }
+
     // ✅ RATE LIMITING: Verificar limite de tentativas por IP
     const clientIp = getClientIp(request);
     const rateLimitResult = await checkRateLimit(`login:${clientIp}`, AUTH_RATE_LIMITS.login.maxAttempts, AUTH_RATE_LIMITS.login.windowMs);
@@ -45,6 +49,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ✅ RATE LIMITING por username: impede força bruta distribuída contra uma conta
+    const userLimit = await checkRateLimit(
+      `login-user:${String(username).toLowerCase()}`,
+      AUTH_RATE_LIMITS.loginPerUser.maxAttempts,
+      AUTH_RATE_LIMITS.loginPerUser.windowMs
+    );
+    if (!userLimit.success) {
+      return NextResponse.json(
+        { error: 'Muitas tentativas para este usuário. Tente novamente mais tarde.' },
+        { status: 429, headers: { ...rateLimitHeaders, 'Retry-After': userLimit.retryAfter.toString() } }
+      );
+    }
+
     // Autenticar
     const result = await authenticateUser(username, password);
 
@@ -59,8 +76,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ✅ Sucesso no login: resetar o rate limit para este IP
+    // ✅ Sucesso no login: resetar os rate limits deste IP e do username
     await resetRateLimit(`login:${clientIp}`);
+    await resetRateLimit(`login-user:${String(username).toLowerCase()}`);
 
     // Criar sessão
     await createSession(result.userId!, result.username!);

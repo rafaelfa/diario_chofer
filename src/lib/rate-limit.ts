@@ -8,6 +8,8 @@ let lastCleanup = 0;
 
 export const AUTH_RATE_LIMITS = {
   login: { maxAttempts: DEFAULT_MAX_ATTEMPTS, windowMs: DEFAULT_WINDOW_MS },
+  // Limite adicional por username: mitiga ataques distribuídos por IP contra uma conta
+  loginPerUser: { maxAttempts: 5, windowMs: 15 * 60 * 1000 },
   register: { maxAttempts: 3, windowMs: 60 * 60 * 1000 },
 } as const;
 
@@ -72,19 +74,20 @@ export async function resetRateLimit(identifier: string): Promise<void> {
 }
 
 /**
- * Extrai o IP do cliente de uma requisição Next.js
- * Considera proxies e headers do Vercel
+ * Extrai o IP do cliente de uma requisição Next.js.
+ *
+ * SEGURANÇA: usa APENAS `x-real-ip`, que é definido pelo edge da Vercel e não
+ * pode ser forjado pelo cliente. Headers como `x-forwarded-for` são controláveis
+ * pelo remetente em ambientes sem proxy confiável — usá-los permitiria bypass
+ * do rate limit via spoofing de IP. Em desenvolvimento local (sem Vercel),
+ * retorna um identificador fixo.
  */
 export function getClientIp(request: Request): string {
-  // Vercel headers
   const xRealIp = request.headers.get('x-real-ip');
   if (xRealIp) {
     return xRealIp;
   }
 
-  const xForwardedFor = request.headers.get('x-forwarded-for');
-  if (xForwardedFor) return xForwardedFor.split(',')[0].trim();
-
-  // Fallback para desenvolvimento local
-  return 'unknown';
+  // Fallback para desenvolvimento local (todas as reqs locais compartilham o bucket)
+  return 'local-dev';
 }

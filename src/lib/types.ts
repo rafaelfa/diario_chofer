@@ -22,6 +22,13 @@ export interface WorkDayEvent {
   description: string;
 }
 
+/** Bloco de pausa CONCLUÍDO e VÁLIDO (persistido como JSON em breakBlocks) */
+export interface StoredBreakBlock {
+  start: string; // ISO
+  end: string;   // ISO
+  minutes: 15 | 30 | 45;
+}
+
 export interface WorkDay {
   id: string;
   date: string;
@@ -44,6 +51,8 @@ export interface WorkDay {
   breakStart?: string | null;
   breakType?: 'continuous' | 'split' | null;
   breakMinutes?: number;
+  /** Blocos de pausa válidos concluídos no dia (JSON: StoredBreakBlock[]) */
+  breakBlocks?: StoredBreakBlock[] | null;
   events: WorkDayEvent[];
   drivingSessions?: DrivingSession[];
   // Campos calculados devolvidos pela API

@@ -126,6 +126,182 @@ export function calcKmTraveled(
 /**
  * Formata minutos totais em string "H:MM".
  */
+/**
+ * ─── Pausa inteligente (Reg. CE 561/2006, Art. 7) ───────────────────────────
+ * Um único botão "PAUSA". O sistema só contabiliza pausas válidas:
+ *   • 45 min contínuos, OU
+ *   • 15 min + 30 min (em dois blocos separados).
+ * Qualquer bloco fora dessas regras NÃO conta como pausa:
+ *   - Bloco ≥45 → pausa contínua cumprida (zera tudo).
+ *   - Bloco entre 15 e 44 → conta como 1ª fase; fica a faltar um bloco
+ *     contínuo de 30 min (mostra "faltam 30 min" no botão).
+ *   - Bloco <15 (ex.: 29 ou 27 min quando ainda não há fase 1) → não conta.
+ *   - Após a fase de 15, bloco ≥30 → pausa dividida cumprida.
+ *   - Após a fase de 15, bloco <30 (ex.: 27) → não conta (mantém "faltam 30").
+ */
+export type BreakPhase = 'none' | 'awaiting15' | 'awaiting30' | 'done';
+
+export interface BreakStateInfo {
+  phase: BreakPhase;
+  /** Minutos que ainda faltam para cumprir a pausa obrigatória (0 se done) */
+  remainingRequiredMinutes: number;
+}
+
+export function computeBreakPhase(elapsedMinutes: number, hadPhase15: boolean): BreakStateInfo {
+  const m = Math.max(0, Math.floor(elapsedMinutes));
+  if (hadPhase15) {
+    // Segunda fase em curso: precisa de 30 min contínuos
+    return m >= 30
+      ? { phase: 'done', remainingRequiredMinutes: 0 }
+      : { phase: 'awaiting30', remainingRequiredMinutes: 30 };
+  }
+  if (m >= 45) return { phase: 'done', remainingRequiredMinutes: 0 };
+  if (m >= 15) return { phase: 'awaiting30', remainingRequiredMinutes: 30 };
+  return { phase: 'awaiting15', remainingRequiredMinutes: 45 };
+}
+
+/**
+ * Tempo total de pausa que deve ser DESCONTADO da condução até agora.
+ * Regra do botão único: cada BLOCO conta apenas pelo bloco completo mais baixo:
+ *   - <15 min → 0 (não conta);
+ *   - 15–44 min → 15 (fase 1);
+ *   - ≥45 min → 45 (pausa contínua).
+ * Na fase 2 (após a fase 1), só um bloco contínuo ≥30 conta (+30).
+ */
+export function creditedBreakMinutes(elapsedMinutes: number, hadPhase15: boolean): number {
+  const m = Math.max(0, Math.floor(elapsedMinutes));
+  if (hadPhase15) return m >= 30 ? 45 : 15;
+  if (m >= 45) return 45;
+  if (m >= 15) return 15;
+  return 0;
+}
+
+/** Minutos de pausa concluídos e válidos ganhos ao terminar um bloco. */
+export function gainedBreakMinutes(elapsedMinutes: number, hadPhase15: boolean): number {
+  const m = Math.max(0, Math.floor(elapsedMinutes));
+  if (!hadPhase15) {
+    if (m >= 45) return 45;
+    if (m >= 15) return 15;
+    return 0;
+  }
+  return m >= 30 ? 30 : 0;
+}
+
+/**
+ * Blocos de pausa CONCLUÍDOS e VÁLIDOS num dia (Reg. CE 561/2006, Art. 7).
+ * Cada bloco conta pelo nível completo mais baixo:
+ *   - ≥45 min contínuos → um bloco de 45;
+ *   - fase 1 (15–44 min) + fase 2 (≥30 min contínuos) → dois blocos (15 + 30);
+ *   - blocos fora destas regras não contam.
+ */
+export interface CompletedBreakBlock {
+  start: Date;
+  end: Date;
+  minutes: 15 | 30 | 45;
+}
+
+/** Ordena blocos por início e remove sobreposições (mantém o primeiro). */
+export function dedupeBreakBlocks(blocks: CompletedBreakBlock[]): CompletedBreakBlock[] {
+  const sorted = [...blocks].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const result: CompletedBreakBlock[] = [];
+  for (const block of sorted) {
+    const prev = result[result.length - 1];
+    if (prev && block.start < prev.end) continue; // sobreposto — descarta
+    result.push(block);
+  }
+  return result;
+}
+
+/**
+ * Condução CONTÍNUA desde a última pausa válida (Art. 7: máx. 4h30).
+ * Percorre cronologicamente sessões de condução e blocos de pausa válidos;
+ * cada pausa válida RENOVA o contador dos 4h30. Retorna os minutos do
+ * segmento de condução em curso (0 se ainda não conduziu ou se está em pausa).
+ */
+export function continuousDrivingSinceLastValidBreak(
+  sessions: Array<{ startTime?: string | null; endTime?: string | null }>,
+  blocks: CompletedBreakBlock[],
+  now: Date = new Date()
+): number {
+  type Item = { start: Date; end: Date; isBreak: boolean };
+  const items: Item[] = [
+    ...dedupeBreakBlocks(blocks).map(b => ({ start: b.start, end: b.end, isBreak: true })),
+    ...sessions
+      .filter(s => s.startTime)
+      .map(s => {
+        const start = new Date(s.startTime as string);
+        const end = s.endTime ? new Date(s.endTime) : now;
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+        return { start, end: end > start ? end : start, isBreak: false };
+      })
+      .filter((x): x is Item => x !== null),
+  ];
+  items.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  let sinceMs = 0;
+  let inBreak = false;
+  for (const item of items) {
+    if (item.isBreak) {
+      sinceMs = 0; // pausa válida renova os 4h30
+      inBreak = item.end > now && item.start <= now;
+    } else {
+      if (inBreak && item.end <= item.start) continue;
+      // se a sessão começa durante uma pausa, o tempo conta a partir do fim da pausa
+      const effectiveStart = inBreak && item.start < item.end ? item.end : item.start;
+      if (effectiveStart >= now) break;
+      sinceMs += Math.max(0, Math.min(item.end.getTime(), now.getTime()) - effectiveStart.getTime());
+      if (item.end >= now) break;
+    }
+  }
+  return Math.floor(sinceMs / 60000);
+}
+
+/** Próximos passos da pausa obrigatória com base na condução contínua atual. */
+export function requiredBreakPlan(continuousMinutes: number): {
+  drivingBeforeBreakMin: number; // limite legal (270 = 4h30)
+  remainingUntilMustPauseMin: number; // quanto falta para ser OBRIGATÓRIO parar
+  remainingRequiredBreakMin: number; // minutos de pausa necessários agora (45 ou 15)
+} {
+  const remaining = Math.max(0, 270 - continuousMinutes);
+  return {
+    drivingBeforeBreakMin: 270,
+    remainingUntilMustPauseMin: remaining,
+    remainingRequiredBreakMin: remaining <= 135 ? 15 : 45,
+  };
+}
+
+/**
+ * Estado persistido após TERMINAR um bloco de pausa.
+ *  - Bloco ≥45 sem fase 1 → pausa cumprida (zera tudo).
+ *  - Bloco 15–44 sem fase 1 → fase 1 ganha, exige bloco contínuo ≥30.
+ *  - Bloco ≥30 com fase 1 → pausa dividida cumprida (zera tudo).
+ *  - Bloco <15 (sem fase 1) ou <30 (com fase 1) → NÃO contabiliza nada;
+ *    mantém o estado anterior (fase 1 continua por cumprir se existia).
+ */
+export function nextBreakState(
+  elapsedMinutes: number,
+  hadPhase15: boolean
+): { hadPhase15: boolean; completedBreakMinutes: number; fullyDone: boolean } {
+  const m = Math.max(0, Math.floor(elapsedMinutes));
+  if (hadPhase15) {
+    return m >= 30
+      ? { hadPhase15: false, completedBreakMinutes: 45, fullyDone: true }
+      : { hadPhase15: true, completedBreakMinutes: 0, fullyDone: false };
+  }
+  if (m >= 45) return { hadPhase15: false, completedBreakMinutes: 45, fullyDone: true };
+  if (m >= 15) return { hadPhase15: true, completedBreakMinutes: 15, fullyDone: false };
+  return { hadPhase15: false, completedBreakMinutes: 0, fullyDone: false };
+}
+
+/** Rótulo do estado actual para mostrar no botão de pausa. */
+export function breakButtonLabel(info: BreakStateInfo): string {
+  switch (info.phase) {
+    case 'done': return 'Pausa cumprida ✓';
+    case 'awaiting30': return 'Faltam 30 min';
+    default: return 'Pausa';
+  }
+}
+
 export function minutesToFormatted(totalMinutes: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;

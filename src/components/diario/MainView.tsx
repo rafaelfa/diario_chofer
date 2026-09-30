@@ -20,9 +20,9 @@ import { MatriculaPlateInput } from '@/components/MatriculaPlateInput';
 import { AmplitudeCard } from '@/components/AmplitudeCard';
 import { CircularTimeCounter } from '@/components/diario/CircularTimeCounter';
 import { DayTimeline } from '@/components/diario/DayTimeline';
+import { BreakStatusCard } from '@/components/diario/BreakStatusCard';
 import { TrafficLightStatus } from '@/components/diario/TrafficLightStatus';
 import { WeeklyBars } from '@/components/diario/WeeklyBars';
-import { BreakTimer } from '@/components/diario/BreakTimer';
 import { WeeklyRestAlert } from '@/components/diario/WeeklyRestAlert';
 import type {
   ConformityStatus,
@@ -72,11 +72,11 @@ interface MainViewProps {
   isDeleting?: boolean;
   // Break (1 driver)
   breakState: BreakState;
-  /** Total de minutos de pausa (concluídas + em curso) — v4.1.5 */
+  /** Total de minutos de pausa VÁLIDOS (concluídas + em curso válida) — v4.1.5 */
   breakMinutes: number;
+  /** Estado da pausa inteligente (fase + minutos em falta) para o botão único */
+  breakPhaseInfo?: { phase: 'none' | 'awaiting15' | 'awaiting30' | 'done'; remainingRequiredMinutes: number };
   onOpenBreak: () => void;
-  onStartBreak: (type: 'continuous' | 'split') => void;
-  onEndBreak: () => void;
 }
 
 export function MainView({
@@ -98,8 +98,7 @@ export function MainView({
   breakState,
   breakMinutes,
   onOpenBreak,
-  onStartBreak,
-  onEndBreak,
+  breakPhaseInfo,
 }: MainViewProps) {
   // Refs for auto-focus after matricula completion
   const startCountryInputRef = useRef<HTMLInputElement>(null);
@@ -371,15 +370,10 @@ export function MainView({
       ) : !currentDay.endTime ? (
         /* DIA EM ANDAMENTO */
         <>
-        {/* BREAK TIMER — No mobile aparece no TOPO antes de tudo */}
+        {/* ESTADO DA PAUSA INTELIGENTE — No mobile aparece no TOPO antes de tudo */}
         {breakState.isActive && currentDay.numDrivers === 1 && (
           <div className="lg:hidden">
-            <BreakTimer
-              breakStartTime={breakState.startTime}
-              breakType={breakState.type}
-              onBreakTypeSelect={onStartBreak}
-              onResume={onEndBreak}
-            />
+            <BreakStatusCard breakState={breakState} />
           </div>
         )}
         {/* AmplitudeCard visível no mobile (topo) */}
@@ -474,15 +468,10 @@ export function MainView({
             </Card>
 
             {/* Pausa / Retomada / Eventos */}
-            {/* No desktop, o BreakTimer aparece aqui (no mobile já está no topo) */}
+            {/* No desktop, o estado da pausa aparece aqui (no mobile já está no topo) */}
             {breakState.isActive && currentDay.numDrivers === 1 ? (
               <div className="hidden lg:block" ref={breakTimerRef}>
-                <BreakTimer
-                  breakStartTime={breakState.startTime}
-                  breakType={breakState.type}
-                  onBreakTypeSelect={onStartBreak}
-                  onResume={onEndBreak}
-                />
+                <BreakStatusCard breakState={breakState} />
               </div>
             ) : currentDay.isPaused && currentDay.numDrivers === 2 ? (
               /* Paused state for 2 drivers - existing card */
@@ -516,9 +505,23 @@ export function MainView({
                     PAUSAR
                   </Button>
                 ) : (
-                  <Button onClick={onOpenBreak} variant="outline" className="h-14 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700 text-base font-medium">
-                    <Pause className="h-5 w-5 mr-2" />
-                    PAUSAR
+                  <Button
+                    onClick={onOpenBreak}
+                    variant="outline"
+                    className={`h-14 text-base font-medium ${
+                      breakState.isActive
+                        ? 'border-red-400 bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700'
+                        : breakPhaseInfo?.phase === 'awaiting30'
+                          ? 'border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700'
+                          : 'border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700'
+                    }`}
+                  >
+                    {breakState.isActive ? <Play className="h-5 w-5 mr-2" /> : <Pause className="h-5 w-5 mr-2" />}
+                    {breakState.isActive
+                      ? 'RETOMAR'
+                      : breakPhaseInfo?.phase === 'awaiting30'
+                        ? `PAUSA — faltam ${breakPhaseInfo.remainingRequiredMinutes} min`
+                        : 'PAUSAR'}
                   </Button>
                 )}
                 <Button onClick={() => setShowEventInput(true)} variant="outline" className="h-14 border-blue-400 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700 text-base font-medium">

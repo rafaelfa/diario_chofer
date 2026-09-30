@@ -20,6 +20,7 @@ import { MatriculaPlateInput } from '@/components/MatriculaPlateInput';
 import { AmplitudeCard } from '@/components/AmplitudeCard';
 import { CircularTimeCounter } from '@/components/diario/CircularTimeCounter';
 import { DayTimeline } from '@/components/diario/DayTimeline';
+import { BreakStatusCard } from '@/components/diario/BreakStatusCard';
 import { TrafficLightStatus } from '@/components/diario/TrafficLightStatus';
 import { WeeklyBars } from '@/components/diario/WeeklyBars';
 import { WeeklyRestAlert } from '@/components/diario/WeeklyRestAlert';

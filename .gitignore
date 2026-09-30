@@ -1,5 +1,5 @@
 # Dependencies
 node_modules/
 
-# Build artifacts & caches
-tsconfig.tsbuildinfo
+# Build outputs and caches
+.next/

@@ -1,11 +1,5 @@
+# Dependencies
 node_modules/
-.next/
-out/
-build/
-dist/
-coverage/
-.vercel/
-*.log
-*.tsbuildinfo
-.env*
-!.env.example
+
+# Build artifacts
+tsconfig.tsbuildinfo

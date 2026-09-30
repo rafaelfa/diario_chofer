@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { requireAuth } from '@/lib/auth';
-import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours, parseStoredBreakBlocks } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
 import { isValidTimeString, parseNonNegativeInteger, validateMatricula } from '@/lib/validators';
 
@@ -163,6 +163,12 @@ export async function PUT(
       const parsedBreakMinutes = parseNonNegativeInteger(body.breakMinutes);
       if (!parsedBreakMinutes.valid) return NextResponse.json({ error: 'Minutos de pausa inválidos' }, { status: 400 });
       dataToUpdate.breakMinutes = parsedBreakMinutes.value ?? 0;
+    }
+    if (body.breakBlocks !== undefined) {
+      // v4.1.8: blocos de pausa com timestamps [{start,end,minutes}] — usados para renovar as 4h30.
+      // Aceita array ou string JSON; blocos inválidos são descartados (parse defensivo partilhado).
+      const blocks = parseStoredBreakBlocks(body.breakBlocks);
+      dataToUpdate.breakBlocks = blocks.length > 0 ? (blocks as unknown as Prisma.InputJsonValue) : Prisma.DbNull;
     }
 
     log('Dados a atualizar:', JSON.stringify(dataToUpdate, null, 2));

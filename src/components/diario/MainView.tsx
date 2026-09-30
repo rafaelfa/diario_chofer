@@ -12,10 +12,11 @@ import {
   Truck, Play, Square, Plus, Clock, MapPin, Gauge,
   CheckCircle2, Calendar, FileText,
   Sun, Moon, Activity, AlertCircle, RefreshCw,
-  Navigation, Pause, FastForward, Users,
+  Navigation, Pause, FastForward, Users, TimerReset,
 } from 'lucide-react';
 import type { WorkDay, Report } from '@/lib/types';
-import { formatDecimalHours } from '@/lib/time';
+import type { ContinuousDrivingInfo } from '@/lib/time';
+import { formatDecimalHours, minutesToFormatted } from '@/lib/time';
 import { MatriculaPlateInput } from '@/components/MatriculaPlateInput';
 import { AmplitudeCard } from '@/components/AmplitudeCard';
 import { CircularTimeCounter } from '@/components/diario/CircularTimeCounter';
@@ -33,6 +34,44 @@ import type {
   LastKmInfo,
   BreakState,
 } from '@/hooks/useDiarioActions';
+
+/**
+ * Cartão do contador de condução contínua (v4.1.8).
+ * Reg. CE 561/2006 Art. 7: após 4h30 de condução contínua é obrigatória uma pausa
+ * de 45min (ou 15+30). Cada pausa VÁLIDA renova o contador a zero.
+ */
+function ContinuousDrivingCard({ info }: { info: ContinuousDrivingInfo }) {
+  const tone = info.exceeded
+    ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/40'
+    : info.warning
+      ? 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40'
+      : 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/70';
+
+  let message: string;
+  if (info.onBreak) {
+    message = 'Pausa em curso — ao concluir 45min (ou 15+30) o contador renova a zero';
+  } else if (info.exceeded) {
+    message = `EXCEDIDO: ${minutesToFormatted(info.continuousMinutes)} contínuos — pare para pausa de 45min (ou 15+30)`;
+  } else if (info.warning) {
+    message = `Faltam ${minutesToFormatted(info.remainingMinutes)} para as 4h30 — prepare pausa de 45min ou 15+30`;
+  } else {
+    message = `Pausa obrigatória em ${minutesToFormatted(info.remainingMinutes)}`;
+  }
+
+  return (
+    <div className={`mb-3 rounded-xl border-2 px-3 py-2 flex items-center gap-2 ${tone}`}>
+      <TimerReset className={`h-5 w-5 shrink-0 ${
+        info.exceeded ? 'text-red-600 animate-pulse' : info.warning ? 'text-amber-600' : 'text-emerald-600'
+      }`} />
+      <div className="min-w-0">
+        <p className="text-sm font-bold leading-tight">
+          Condução contínua: {minutesToFormatted(info.continuousMinutes)} / 4:30
+        </p>
+        <p className="text-xs text-muted-foreground leading-tight">{message}</p>
+      </div>
+    </div>
+  );
+}
 
 interface MainViewProps {
   currentDay: WorkDay | null;
@@ -77,6 +116,8 @@ interface MainViewProps {
   onOpenBreak: () => void;
   onStartBreak: (type: 'continuous' | 'split') => void;
   onEndBreak: () => void;
+  /** Info do contador de condução contínua (limite 4h30) — v4.1.8 */
+  continuousDrivingInfo?: ContinuousDrivingInfo | null;
 }
 
 export function MainView({
@@ -100,6 +141,7 @@ export function MainView({
   onOpenBreak,
   onStartBreak,
   onEndBreak,
+  continuousDrivingInfo,
 }: MainViewProps) {
   // Refs for auto-focus after matricula completion
   const startCountryInputRef = useRef<HTMLInputElement>(null);
@@ -462,6 +504,13 @@ export function MainView({
                   maxHours={9}
                   breakMinutes={breakMinutes}
                 />
+
+                {/* v4.1.8: contador de condução contínua (renovação dos 4h30) */}
+                {continuousDrivingInfo && currentDay.numDrivers === 1 && (
+                  <div className="mt-3">
+                    <ContinuousDrivingCard info={continuousDrivingInfo} />
+                  </div>
+                )}
 
                 <div className="mt-4">
                   <DayTimeline

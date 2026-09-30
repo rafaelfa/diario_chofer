@@ -20,6 +20,7 @@ Aplicacao web responsiva para registrar jornadas de motoristas, sessoes de condu
 - Abertura e encerramento de jornadas com data, horarios, paises, matricula, verificacao do veiculo, odometro e observacoes.
 - Jornadas com um ou dois motoristas, identificacao do motorista principal e alternancia de sessoes na troca de condutor.
 - Pausas continuas ou divididas para jornadas individuais; o inicio e o total concluido ficam persistidos no banco.
+- Contador de conducao continua com renovacao dos 4h30 (Reg. CE 561/2006, Art. 7): cada pausa valida (45min continuos ou par 15+30 dentro de ate 75min) zera o contador; pausas invalidas nao renovam. Os blocos de pausa com timestamps reais sao persistidos na coluna `break_blocks` (JSON) da tabela `work_days` (migration `20261001_add_break_blocks`). O cartao na tela atualiza a cada 10s e avisa em ambar quando faltam <=30min para as 4h30, em vermelho quando o limite e excedido (v4.1.8).
 - Eventos vinculados a uma jornada, como abastecimento, fronteiras e anotacoes.
 - Historico de jornadas, consulta do ultimo odometro por matricula, estatisticas por veiculo e relatorios semanais, mensais, por periodo e para impressao em PDF.
 - Alertas auxiliares de conducao diaria, semanal e em duas semanas, considerando sessoes e pausas registradas.

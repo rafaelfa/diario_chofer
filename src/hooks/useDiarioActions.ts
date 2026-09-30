@@ -13,7 +13,7 @@
  * The return signature remains IDENTICAL so page.tsx needs no changes.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback , useMemo} from 'react';
 import { useRouter } from 'next/navigation';
 import { useGeolocation } from '@/hooks/use-geolocation';
 import { useConnectivity } from '@/hooks/useConnectivity';
@@ -23,7 +23,8 @@ import { useDialogManager } from '@/hooks/useDialogManager';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import type { WorkDay, ActiveView } from '@/lib/types';
 import { logError } from '@/lib/logger';
-import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
+import { calcDrivingMinutes, minutesToFormatted, parseStoredBreakBlocks, dedupeBreakBlocks, getContinuousDrivingInfo } from '@/lib/time';
+import type { StoredBreakBlock } from '@/lib/time';
 import { validateMatricula } from '@/lib/validators';
 import {
   getLocalDateString,
@@ -83,6 +84,8 @@ export interface BreakState {
   type: 'none' | 'continuous' | 'split';
   /** Acumula o total de minutos de pausas já concluídas no dia (não inclui pausa em curso) */
   completedBreakMinutes: number;
+  /** Blocos de pausa concluídos com timestamps reais — renovam as 4h30 (v4.1.8) */
+  completedBlocks?: StoredBreakBlock[];
 }
 
 export interface WorkingTimeResult {
@@ -142,6 +145,15 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     formatDate,
   } = useWorkingTime(currentDay, breakState, clockNow);
 
+  // v4.1.8: contador de condução contínua (renovação dos 4h30 pelo fim de pausas válidas)
+  const continuousDrivingInfo = useMemo(() => {
+    if (!currentDay || currentDay.endTime) return null;
+    return getContinuousDrivingInfo(currentDay, {
+      now: clockNow ?? undefined,
+      activeBreakStart: breakState.isActive ? breakState.startTime : null,
+    });
+  }, [currentDay, clockNow, breakState.isActive, breakState.startTime]);
+
   const {
     startForm, setStartForm,
     endForm, setEndForm,
@@ -176,9 +188,10 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   // Atualizar o relógio fora do render para manter os cálculos puros.
   useEffect(() => {
     const frame = requestAnimationFrame(() => setClockNow(new Date()));
+    // v4.1.8: relógio a cada 10s para o contador de condução contínua (4h30)
     const interval = setInterval(() => {
       setClockNow(new Date());
-    }, 60000);
+    }, 10_000);
     return () => {
       cancelAnimationFrame(frame);
       clearInterval(interval);
@@ -387,8 +400,8 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
       setStartForm({ startCountry: '', startKm: '', lastRest: '', truckCheck: false, matricula: '', numDrivers: 1, primaryDriverNumber: 1 });
       setLastKmInfo(null);
-      // Reiniciar contador de pausas acumuladas ao iniciar novo dia
-      setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: 0 });
+      // Reinicia o estado de pausa ao iniciar novo dia
+      setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: 0, completedBlocks: [] });
       showToast('Dia iniciado com sucesso!', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Erro de conexão', 'error');
@@ -448,6 +461,17 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     setIsEnding(true);
     try {
       const now = new Date();
+      // v4.1.8: se houver pausa em curso ao fechar o dia, converte-a num bloco concluído
+      const closingBlocks = dedupeBreakBlocks([
+        ...(breakState.completedBlocks ?? []),
+        ...(breakState.isActive && breakState.startTime
+          ? [{
+              start: breakState.startTime.toISOString(),
+              end: now.toISOString(),
+              minutes: Math.max(0, Math.floor((now.getTime() - breakState.startTime.getTime()) / 60000)),
+            }]
+          : []),
+      ]);
       await endDay(currentDay.id, {
         endTime: getLocalTimeString(now),
         endCountry: endForm.endCountry,
@@ -457,9 +481,10 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         breakStart: null,
         breakType: null,
         breakMinutes: getBreakMinutes(),
+        breakBlocks: JSON.stringify(closingBlocks),
       });
 
-      setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: getBreakMinutes() });
+      setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: getBreakMinutes(), completedBlocks: closingBlocks });
       setShowEndForm(false);
       setEndForm({ endCountry: '', endKm: '', observations: '' });
       showToast('Dia finalizado com sucesso!', 'success');
@@ -560,11 +585,12 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   //  BREAK (1 DRIVER - CLIENT-SIDE ONLY)
   // ═══════════════════════════════════════════════════════════════════════
 
-  // Opens the break type selection screen
   // (#1) Restaurar pausa em curso vinda do banco ao carregar/atualizar o dia
+  // (v4.1.8) Restaura também os blocos de pausa persistidos (breakBlocks)
   useEffect(() => {
     if (!currentDay) return;
     if (currentDay.endTime) return;
+    const persistedBlocks = parseStoredBreakBlocks(currentDay.breakBlocks);
     const dbActive = !!currentDay.breakStart && !!currentDay.breakType;
     if (dbActive) {
       setBreakState(prev => {
@@ -574,6 +600,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
           startTime: new Date(currentDay.breakStart as string),
           type: currentDay.breakType as 'continuous' | 'split',
           completedBreakMinutes: currentDay.breakMinutes ?? 0,
+          completedBlocks: persistedBlocks,
         };
       });
     } else {
@@ -582,19 +609,40 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         startTime: null,
         type: 'none',
         completedBreakMinutes: currentDay.breakMinutes ?? 0,
+        completedBlocks: persistedBlocks,
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDay?.id, currentDay?.breakStart, currentDay?.breakType]);
- const handleOpenBreak = useCallback(() => {
+  }, [currentDay?.id, currentDay?.breakStart, currentDay?.breakType, currentDay?.breakBlocks]);
+
+  // Abre o seletor de tipo de pausa; se já existir pausa em curso, finaliza-a
+  // criando um bloco concluído (com timestamps reais) e persistindo-o — v4.1.8
+  const handleOpenBreak = useCallback(() => {
     setBreakState(prev => {
       if (prev.isActive && prev.startTime) {
-        showToast('Já existe uma pausa em curso. Use RETOMAR para finalizar.', 'warning');
-        return prev;
+        const endedAt = new Date();
+        const minutes = Math.max(0, Math.floor((endedAt.getTime() - prev.startTime.getTime()) / 60000));
+        const blocks = dedupeBreakBlocks([
+          ...(prev.completedBlocks ?? []),
+          { start: prev.startTime.toISOString(), end: endedAt.toISOString(), minutes },
+        ]);
+        const completedBreakMinutes = prev.completedBreakMinutes + minutes;
+        if (currentDay) {
+          void saveBreakState(currentDay.id, {
+            breakStart: null,
+            breakType: null,
+            breakMinutes: completedBreakMinutes,
+            breakBlocks: JSON.stringify(blocks),
+          }).catch(() => {
+            showToast('Não foi possível salvar o fim da pausa. Verifique a conexão.', 'error');
+          });
+        }
+        showToast('Pausa anterior finalizada. Escolha o tipo da nova pausa.', 'success');
+        return { isActive: true, startTime: null, type: 'none', completedBreakMinutes, completedBlocks: blocks };
       }
       return { ...prev, isActive: true, startTime: null, type: 'none' };
     });
-  }, [setBreakState, showToast]);
+  }, [setBreakState, showToast, currentDay, saveBreakState]);
 
   // Confirms break type and starts the timer
   const handleStartBreak = useCallback(async (type: 'continuous' | 'split') => {
@@ -615,25 +663,41 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   }, [breakState.completedBreakMinutes, currentDay, saveBreakState, setBreakState, showToast]);
 
   const handleEndBreak = useCallback(() => {
-    // Calcular duração da pausa que está a terminar
+    // Calcular duração da pausa que está a terminar e criar bloco com timestamps reais (v4.1.8)
     let breakMinutes = 0;
     if (breakState.startTime) {
       breakMinutes = Math.floor((Date.now() - breakState.startTime.getTime()) / 60000);
     }
 
+    const completedBlocks = breakState.startTime && breakMinutes > 0
+      ? dedupeBreakBlocks([
+          ...(breakState.completedBlocks ?? []),
+          {
+            start: breakState.startTime.toISOString(),
+            end: new Date().toISOString(),
+            minutes: breakMinutes,
+          },
+        ])
+      : (breakState.completedBlocks ?? []);
+
     const completedBreakMinutes = breakState.completedBreakMinutes + Math.max(breakMinutes, 0);
-    setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes });
+    setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes, completedBlocks });
     void (async () => {
       try {
         if (currentDay) {
-          await saveBreakState(currentDay.id, { breakStart: null, breakType: null, breakMinutes: completedBreakMinutes });
+          await saveBreakState(currentDay.id, {
+            breakStart: null,
+            breakType: null,
+            breakMinutes: completedBreakMinutes,
+            breakBlocks: JSON.stringify(completedBlocks),
+          });
         }
         showToast('Condução retomada!', 'success');
       } catch {
         showToast('Não foi possível salvar o fim da pausa. Verifique a conexão.', 'error');
       }
     })();
-  }, [breakState.completedBreakMinutes, breakState.startTime, currentDay, saveBreakState, setBreakState, showToast]);
+  }, [breakState.completedBreakMinutes, breakState.completedBlocks, breakState.startTime, currentDay, saveBreakState, setBreakState, showToast]);
 
   // ═══════════════════════════════════════════════════════════════════════
   //  GERENCIAMENTO (VIEW / EDIT / DELETE)
@@ -818,6 +882,8 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     handleEndBreak,
     /** Total de minutos de pausa (concluídas + em curso) — v4.1.5 */
     breakMinutes: getBreakMinutes(),
+    /** Info do contador de condução contínua (limite 4h30) — v4.1.8 */
+    continuousDrivingInfo,
 
     // --- Computed ---
     conformity,

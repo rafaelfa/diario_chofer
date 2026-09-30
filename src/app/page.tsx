@@ -25,7 +25,7 @@ import { HistoryView } from '@/components/diario/HistoryView';
 import { ReportsView } from '@/components/diario/ReportsView';
 import { SettingsView } from '@/components/diario/SettingsView';
 
-const APP_VERSION = '4.1.7';
+const APP_VERSION = '4.1.8';
 
 export default function DiarioMotorista() {
   const wd = useWorkDays();
@@ -48,6 +48,7 @@ export default function DiarioMotorista() {
     showPauseDialog, setShowPauseDialog, pauseKm, setPauseKm, isProcessingPause,
     breakState,
     breakMinutes,
+    continuousDrivingInfo,
     conformity, workingTime,
     isStarting, isEnding,
     handleStartDay, handleEndDay, handleAddEvent,
@@ -128,6 +129,7 @@ export default function DiarioMotorista() {
             onOpenBreak={handleOpenBreak}
             onStartBreak={handleStartBreak}
             onEndBreak={handleEndBreak}
+            continuousDrivingInfo={continuousDrivingInfo}
             workDays={workDays}
           />
         )}

@@ -41,6 +41,8 @@ interface EndDayPayload {
   breakStart?: string | null;
   breakType?: string | null;
   breakMinutes?: number;
+  /** JSON com blocos de pausa [{start,end,minutes}] — v4.1.8 */
+  breakBlocks?: string;
 }
 
 interface EditDayPayload {
@@ -179,7 +181,7 @@ export function useWorkDays() {
 
   /** Persiste o estado da pausa no banco (fire-and-forget com retry único) */
   const saveBreakState = useCallback(
-    async (dayId: string, payload: { breakStart: string | null; breakType: string | null; breakMinutes: number }): Promise<void> => {
+    async (dayId: string, payload: { breakStart: string | null; breakType: string | null; breakMinutes: number; breakBlocks?: string }): Promise<void> => {
       const send = () => fetch(`/api/workdays/${dayId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },

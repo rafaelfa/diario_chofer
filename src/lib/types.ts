@@ -44,6 +44,8 @@ export interface WorkDay {
   breakStart?: string | null;
   breakType?: 'continuous' | 'split' | null;
   breakMinutes?: number;
+  /** Blocos de pausa concluídos com timestamps (JSON): [{start,end,minutes}] — v4.1.8 */
+  breakBlocks?: unknown;
   events: WorkDayEvent[];
   drivingSessions?: DrivingSession[];
   // Campos calculados devolvidos pela API

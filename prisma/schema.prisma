@@ -54,6 +54,7 @@ model WorkDay {
   breakStart    DateTime?        @map("break_start") // Início da pausa em curso (persistida — sobrevive a refresh)
   breakType     String?          @map("break_type") // 'continuous' | 'split' | null
   breakMinutes  Int              @default(0) @map("break_minutes") // Total de minutos de pausas concluídas no dia
+  breakBlocks   Json?            @map("break_blocks") // Blocos de pausa com timestamps: [{start,end,minutes}] — usados para renovar as 4h30 (Reg. 561/2006 Art. 7)
 
   // Relacionamentos
   user             AppUser          @relation(fields: [userId], references: [id], onDelete: Cascade)

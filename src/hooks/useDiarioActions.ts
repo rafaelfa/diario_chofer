@@ -80,7 +80,8 @@ export interface ConformityStatus {
 export interface BreakState {
   isActive: boolean;
   startTime: Date | null;
-  type: 'none' | 'continuous' | 'split';
+  /** 'part1' = 1ª parte de 15min | 'part2' = 2ª parte de 30min (total legal: 45min) */
+  type: 'none' | 'part1' | 'part2';
   /** Acumula o total de minutos de pausas já concluídas no dia (não inclui pausa em curso) */
   completedBreakMinutes: number;
 }
@@ -569,10 +570,13 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     if (dbActive) {
       setBreakState(prev => {
         if (prev.isActive && prev.startTime) return prev;
+        // Compatibilidade: valores antigos ('continuous'/'split') mapeados para a nova lógica
+        const rawType = currentDay.breakType as string;
+        const type: 'part1' | 'part2' = rawType === 'part2' || rawType === 'split' ? 'part2' : 'part1';
         return {
           isActive: true,
           startTime: new Date(currentDay.breakStart as string),
-          type: currentDay.breakType as 'continuous' | 'split',
+          type,
           completedBreakMinutes: currentDay.breakMinutes ?? 0,
         };
       });
@@ -597,7 +601,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   }, [setBreakState, showToast]);
 
   // Confirms break type and starts the timer
-  const handleStartBreak = useCallback(async (type: 'continuous' | 'split') => {
+  const handleStartBreak = useCallback(async (type: 'part1' | 'part2') => {
     const startedAt = new Date();
     setBreakState(prev => ({ ...prev, isActive: true, startTime: startedAt, type }));
     try {

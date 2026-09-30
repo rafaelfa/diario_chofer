@@ -52,7 +52,7 @@ model WorkDay {
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
   breakStart    DateTime?        @map("break_start") // Início da pausa em curso (persistida — sobrevive a refresh)
-  breakType     String?          @map("break_type") // 'continuous' | 'split' | null
+  breakType     String?          @map("break_type") // 'part1' | 'part2' | null (legado: 'continuous' | 'split')
   breakMinutes  Int              @default(0) @map("break_minutes") // Total de minutos de pausas concluídas no dia
 
   // Relacionamentos

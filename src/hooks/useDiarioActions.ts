@@ -22,6 +22,7 @@ import { useDayForms } from '@/hooks/useDayForms';
 import { useDialogManager } from '@/hooks/useDialogManager';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import type { WorkDay, ActiveView } from '@/lib/types';
+import { computeBreakPhase, gainedBreakMinutes } from '@/lib/time';
 import { logError } from '@/lib/logger';
 import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
 import { validateMatricula } from '@/lib/validators';
@@ -81,7 +82,9 @@ export interface BreakState {
   isActive: boolean;
   startTime: Date | null;
   type: 'none' | 'continuous' | 'split';
-  /** Acumula o total de minutos de pausas já concluídas no dia (não inclui pausa em curso) */
+  /** true = já foi cumprido um bloco válido de ≥15 min; a próxima pausa válida precisa de ≥30 min contínuos */
+  hadPhase15: boolean;
+  /** Acumula apenas o total de minutos de pausas VÁLIDAS já concluídas no dia (não inclui pausa em curso) */
   completedBreakMinutes: number;
 }
 
@@ -388,7 +391,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       setStartForm({ startCountry: '', startKm: '', lastRest: '', truckCheck: false, matricula: '', numDrivers: 1, primaryDriverNumber: 1 });
       setLastKmInfo(null);
       // Reiniciar contador de pausas acumuladas ao iniciar novo dia
-      setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: 0 });
+      setBreakState({ isActive: false, startTime: null, type: 'none', hadPhase15: false, completedBreakMinutes: 0 });
       showToast('Dia iniciado com sucesso!', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Erro de conexão', 'error');
@@ -459,7 +462,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         breakMinutes: getBreakMinutes(),
       });
 
-      setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: getBreakMinutes() });
+      setBreakState({ isActive: false, startTime: null, type: 'none', hadPhase15: false, completedBreakMinutes: getBreakMinutes() });
       setShowEndForm(false);
       setEndForm({ endCountry: '', endKm: '', observations: '' });
       showToast('Dia finalizado com sucesso!', 'success');
@@ -560,8 +563,20 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   //  BREAK (1 DRIVER - CLIENT-SIDE ONLY)
   // ═══════════════════════════════════════════════════════════════════════
 
-  // Opens the break type selection screen
-  // (#1) Restaurar pausa em curso vinda do banco ao carregar/atualizar o dia
+  // ─── Pausa inteligente (botão único "PAUSA") ──────────────────────────────
+  // Regras contabilizadas (Reg. CE 561/2006, Art. 7):
+  //   • bloco ≥45 min contínuos → pausa cumprida;
+  //   • bloco ≥15 min → conta como fase 1 e passa a exigir um bloco contínuo
+  //     de ≥30 min ("faltam 30 min" fica marcado no botão);
+  //   • qualquer bloco fora destas regras NÃO é contabilizado.
+  const getElapsedBreakMinutes = useCallback((): number => {
+    if (!breakState.isActive || !breakState.startTime) return 0;
+    return Math.max(Math.floor((Date.now() - breakState.startTime.getTime()) / 60000), 0);
+  }, [breakState.isActive, breakState.startTime]);
+
+  const breakPhaseInfo = computeBreakPhase(getElapsedBreakMinutes(), breakState.hadPhase15);
+
+  // Restaurar pausa em curso vinda do banco ao carregar/atualizar o dia
   useEffect(() => {
     if (!currentDay) return;
     if (currentDay.endTime) return;
@@ -573,6 +588,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
           isActive: true,
           startTime: new Date(currentDay.breakStart as string),
           type: currentDay.breakType as 'continuous' | 'split',
+          hadPhase15: currentDay.breakType === 'split',
           completedBreakMinutes: currentDay.breakMinutes ?? 0,
         };
       });
@@ -581,59 +597,79 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         isActive: false,
         startTime: null,
         type: 'none',
+        hadPhase15: false,
         completedBreakMinutes: currentDay.breakMinutes ?? 0,
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDay?.id, currentDay?.breakStart, currentDay?.breakType]);
- const handleOpenBreak = useCallback(() => {
-    setBreakState(prev => {
-      if (prev.isActive && prev.startTime) {
-        showToast('Já existe uma pausa em curso. Use RETOMAR para finalizar.', 'warning');
-        return prev;
-      }
-      return { ...prev, isActive: true, startTime: null, type: 'none' };
-    });
-  }, [setBreakState, showToast]);
 
-  // Confirms break type and starts the timer
-  const handleStartBreak = useCallback(async (type: 'continuous' | 'split') => {
+  /** Botão único "PAUSA": inicia ou termina a pausa conforme o estado actual. */
+  const handleOpenBreak = useCallback(() => {
+    // Terminar pausa em curso
+    if (breakState.isActive && breakState.startTime) {
+      const elapsed = Math.max(Math.floor((Date.now() - breakState.startTime.getTime()) / 60000), 0);
+      const gained = gainedBreakMinutes(elapsed, breakState.hadPhase15);
+      const nowHadPhase15 = breakState.hadPhase15 ? elapsed >= 30 : elapsed >= 15 && elapsed < 45;
+      const completedBreakMinutes = breakState.completedBreakMinutes + gained;
+
+      setBreakState({
+        isActive: false,
+        startTime: null,
+        type: 'none',
+        hadPhase15: nowHadPhase15,
+        completedBreakMinutes,
+      });
+
+      void (async () => {
+        try {
+          if (currentDay) {
+            await saveBreakState(currentDay.id, {
+              breakStart: null,
+              breakType: nowHadPhase15 ? 'split' : null,
+              breakMinutes: completedBreakMinutes,
+            });
+          }
+          if (gained > 0) {
+            showToast(
+              nowHadPhase15 && !breakState.hadPhase15
+                ? `Pausa de ${elapsed} min registada (fase 1). Faltam 30 min contínuos.`
+                : 'Pausa obrigatória cumprida!',
+              'success'
+            );
+          } else {
+            showToast(`Pausa de ${elapsed} min não é válida — não foi contabilizada.`, 'warning');
+          }
+        } catch {
+          showToast('Não foi possível salvar o fim da pausa. Verifique a conexão.', 'error');
+        }
+      })();
+      return;
+    }
+
+    // Iniciar pausa
+    if (breakState.isActive) {
+      showToast('Já existe uma pausa em curso.', 'warning');
+      return;
+    }
     const startedAt = new Date();
+    const type = breakState.hadPhase15 ? 'split' : 'continuous';
     setBreakState(prev => ({ ...prev, isActive: true, startTime: startedAt, type }));
-    try {
-      if (currentDay) {
-        await saveBreakState(currentDay.id, {
-          breakStart: startedAt.toISOString(),
-          breakType: type,
-          breakMinutes: breakState.completedBreakMinutes,
-        });
-      }
-      showToast('Pausa iniciada!', 'success');
-    } catch {
-      showToast('Não foi possível salvar a pausa. Verifique a conexão.', 'error');
-    }
-  }, [breakState.completedBreakMinutes, currentDay, saveBreakState, setBreakState, showToast]);
-
-  const handleEndBreak = useCallback(() => {
-    // Calcular duração da pausa que está a terminar
-    let breakMinutes = 0;
-    if (breakState.startTime) {
-      breakMinutes = Math.floor((Date.now() - breakState.startTime.getTime()) / 60000);
-    }
-
-    const completedBreakMinutes = breakState.completedBreakMinutes + Math.max(breakMinutes, 0);
-    setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes });
     void (async () => {
       try {
         if (currentDay) {
-          await saveBreakState(currentDay.id, { breakStart: null, breakType: null, breakMinutes: completedBreakMinutes });
+          await saveBreakState(currentDay.id, {
+            breakStart: startedAt.toISOString(),
+            breakType: type,
+            breakMinutes: breakState.completedBreakMinutes,
+          });
         }
-        showToast('Condução retomada!', 'success');
+        showToast(breakState.hadPhase15 ? 'Pausa iniciada — precisa de 30 min contínuos.' : 'Pausa iniciada!', 'success');
       } catch {
-        showToast('Não foi possível salvar o fim da pausa. Verifique a conexão.', 'error');
+        showToast('Não foi possível salvar a pausa. Verifique a conexão.', 'error');
       }
     })();
-  }, [breakState.completedBreakMinutes, breakState.startTime, currentDay, saveBreakState, setBreakState, showToast]);
+  }, [breakState, currentDay, saveBreakState, setBreakState, showToast]);
 
   // ═══════════════════════════════════════════════════════════════════════
   //  GERENCIAMENTO (VIEW / EDIT / DELETE)
@@ -814,9 +850,9 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     breakState,
     setBreakState,
     handleOpenBreak,
-    handleStartBreak,
-    handleEndBreak,
-    /** Total de minutos de pausa (concluídas + em curso) — v4.1.5 */
+    /** Estado da pausa inteligente para o botão único (fase + minutos em falta) */
+    breakPhaseInfo,
+    /** Total de minutos de pausa VÁLIDOS (concluídas + em curso válida) — v4.1.5 */
     breakMinutes: getBreakMinutes(),
 
     // --- Computed ---

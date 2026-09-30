@@ -43,6 +43,7 @@ export function useDialogManager() {
     isActive: false,
     startTime: null,
     type: 'none',
+    hadPhase15: false,
     completedBreakMinutes: 0,
   });
 

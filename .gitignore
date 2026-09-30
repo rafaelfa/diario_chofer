@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
 
-# Environment
-.env
-.env.local
+# Build artifacts & caches
+tsconfig.tsbuildinfo

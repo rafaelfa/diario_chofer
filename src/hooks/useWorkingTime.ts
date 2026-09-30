@@ -13,7 +13,7 @@
 
 import { useCallback } from 'react';
 import type { WorkDay } from '@/lib/types';
-import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
+import { calcDrivingMinutes, minutesToFormatted, creditedBreakMinutes } from '@/lib/time';
 import { formatDatePt, getLocalTimeString } from '@/lib/timezone';
 import type { ConformityStatus, WorkingTimeResult, BreakState } from './useDiarioActions';
 
@@ -25,17 +25,20 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
   };
 
   /**
-   * Calcula o total de minutos de pausa que devem ser subtraídos.
+   * Calcula o total de minutos de pausa VÁLIDOS que devem ser subtraídos.
    * Inclui:
-   *   - Pausas já concluídas (completedBreakMinutes)
-   *   - Pausa activa em curso (se houver)
+   *   - Pausas já concluídas e válidas (completedBreakMinutes)
+   *   - Pausa activa em curso — só desconta se for válida segundo o Reg. 561:
+   *       • bloco ≥45 min contínuos, OU
+   *       • fase 1 ≥15 min (desconta 15) seguida de fase 2 ≥30 min (desconta +30).
+   *   Blocos inválidos (<15 sem fase 1; <30 com fase 1 cumprida) não descontam.
    */
   const getBreakMinutes = useCallback((): number => {
     let total = breakState?.completedBreakMinutes ?? currentDay?.breakMinutes ?? 0;
 
     if (breakState?.isActive && breakState.startTime && now) {
       const elapsed = Math.floor((now.getTime() - breakState.startTime.getTime()) / 60000);
-      total += Math.max(elapsed, 0);
+      total += creditedBreakMinutes(elapsed, !!breakState.hadPhase15);
     }
 
     return Math.max(total, 0);

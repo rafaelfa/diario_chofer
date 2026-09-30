@@ -126,6 +126,68 @@ export function calcKmTraveled(
 /**
  * Formata minutos totais em string "H:MM".
  */
+/**
+ * ─── Pausa inteligente (Reg. CE 561/2006, Art. 7) ───────────────────────────
+ * Um único botão "PAUSA". O sistema só contabiliza pausas válidas:
+ *   • 45 min contínuos, OU
+ *   • 15 min + 30 min (em dois blocos separados).
+ * Qualquer bloco fora dessas regras NÃO conta como pausa:
+ *   - Bloco ≥45 → pausa contínua cumprida (zera tudo).
+ *   - Bloco entre 15 e 44 → conta como 1ª fase; fica a faltar um bloco
+ *     contínuo de 30 min (mostra "faltam 30 min" no botão).
+ *   - Bloco <15 (ex.: 29 ou 27 min quando ainda não há fase 1) → não conta.
+ *   - Após a fase de 15, bloco ≥30 → pausa dividida cumprida.
+ *   - Após a fase de 15, bloco <30 (ex.: 27) → não conta (mantém "faltam 30").
+ */
+export type BreakPhase = 'none' | 'awaiting15' | 'awaiting30' | 'done';
+
+export interface BreakStateInfo {
+  phase: BreakPhase;
+  /** Minutos que ainda faltam para cumprir a pausa obrigatória (0 se done) */
+  remainingRequiredMinutes: number;
+}
+
+export function computeBreakPhase(elapsedMinutes: number, hadPhase15: boolean): BreakStateInfo {
+  const m = Math.max(0, Math.floor(elapsedMinutes));
+  if (hadPhase15) {
+    // Segunda fase em curso: precisa de 30 min contínuos
+    return m >= 30
+      ? { phase: 'done', remainingRequiredMinutes: 0 }
+      : { phase: 'awaiting30', remainingRequiredMinutes: 30 };
+  }
+  if (m >= 45) return { phase: 'done', remainingRequiredMinutes: 0 };
+  if (m >= 15) return { phase: 'awaiting30', remainingRequiredMinutes: 30 };
+  return { phase: 'awaiting15', remainingRequiredMinutes: 45 };
+}
+
+/** Tempo total de pausa que deve ser DESCONTADO da condução até agora. */
+export function creditedBreakMinutes(elapsedMinutes: number, hadPhase15: boolean): number {
+  const info = computeBreakPhase(elapsedMinutes, hadPhase15);
+  if (info.phase === 'done') return hadPhase15 ? 30 : 45;
+  if (info.phase === 'awaiting30' && hadPhase15) return 15; // fase 1 já ganha 15 min
+  return 0; // pausa em curso ainda não é válida — não desconta
+}
+
+/** Minutos de pausa concluídos e válidos ganhos ao terminar um bloco. */
+export function gainedBreakMinutes(elapsedMinutes: number, hadPhase15: boolean): number {
+  const m = Math.max(0, Math.floor(elapsedMinutes));
+  if (!hadPhase15) {
+    if (m >= 45) return 45;
+    if (m >= 15) return 15;
+    return 0;
+  }
+  return m >= 30 ? 30 : 0;
+}
+
+/** Rótulo do estado actual para mostrar no botão de pausa. */
+export function breakButtonLabel(info: BreakStateInfo): string {
+  switch (info.phase) {
+    case 'done': return 'Pausa cumprida ✓';
+    case 'awaiting30': return 'Faltam 30 min';
+    default: return 'Pausa';
+  }
+}
+
 export function minutesToFormatted(totalMinutes: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;

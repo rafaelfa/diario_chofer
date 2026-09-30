@@ -21,10 +21,12 @@ interface BreakStatusCardProps {
 export function BreakStatusCard({ breakState }: BreakStatusCardProps) {
   const [now, setNow] = useState(0);
 
-  // Atualiza o relógio a cada 30s enquanto a pausa está em curso
+  // Atualiza o relógio a cada 10s enquanto a pausa está em curso
   useEffect(() => {
     if (!breakState.isActive) return;
-    const id = setInterval(() => setNow(Date.now()), 30_000);
+    const tick = () => setNow(Date.now());
+    tick();
+    const id = setInterval(tick, 10_000);
     return () => clearInterval(id);
   }, [breakState.isActive]);
 

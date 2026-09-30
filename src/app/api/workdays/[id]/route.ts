@@ -154,7 +154,7 @@ export async function PUT(
       dataToUpdate.breakStart = parsedBreakStart;
     }
     if (body.breakType !== undefined) {
-      if (body.breakType !== null && body.breakType !== '' && !['continuous', 'split'].includes(body.breakType)) {
+      if (body.breakType !== null && body.breakType !== '' && !['continuous', 'split', 'block'].includes(body.breakType)) {
         return NextResponse.json({ error: 'Tipo de pausa inválido' }, { status: 400 });
       }
       dataToUpdate.breakType = body.breakType || null;
@@ -163,6 +163,23 @@ export async function PUT(
       const parsedBreakMinutes = parseNonNegativeInteger(body.breakMinutes);
       if (!parsedBreakMinutes.valid) return NextResponse.json({ error: 'Minutos de pausa inválidos' }, { status: 400 });
       dataToUpdate.breakMinutes = parsedBreakMinutes.value ?? 0;
+    }
+    if (body.breakBlocks !== undefined) {
+      if (body.breakBlocks === null) {
+        dataToUpdate.breakBlocks = Prisma.DbNull;
+      } else if (Array.isArray(body.breakBlocks)) {
+        const valid = (body.breakBlocks as unknown[]).every(b =>
+          !!b && typeof b === 'object' &&
+          typeof (b as { start?: unknown }).start === 'string' &&
+          typeof (b as { end?: unknown }).end === 'string' &&
+          !Number.isNaN(Date.parse((b as { start: string }).start)) &&
+          !Number.isNaN(Date.parse((b as { end: string }).end))
+        );
+        if (!valid) return NextResponse.json({ error: 'Blocos de pausa inválidos' }, { status: 400 });
+        dataToUpdate.breakBlocks = body.breakBlocks;
+      } else {
+        return NextResponse.json({ error: 'Blocos de pausa inválidos' }, { status: 400 });
+      }
     }
 
     log('Dados a atualizar:', JSON.stringify(dataToUpdate, null, 2));

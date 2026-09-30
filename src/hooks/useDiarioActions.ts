@@ -80,9 +80,11 @@ export interface ConformityStatus {
 export interface BreakState {
   isActive: boolean;
   startTime: Date | null;
-  type: 'none' | 'continuous' | 'split';
+  type: 'none' | 'continuous' | 'split' | 'block';
   /** Acumula o total de minutos de pausas já concluídas no dia (não inclui pausa em curso) */
   completedBreakMinutes: number;
+  /** Blocos de pausa concluídos no dia, com timestamps reais (Art. 7 Reg. 561/2006) */
+  blocks: BreakBlock[];
 }
 
 export interface WorkingTimeResult {

@@ -42,8 +42,10 @@ export interface WorkDay {
   timezone?: string | null;
   utcOffset?: string | null;
   breakStart?: string | null;
-  breakType?: 'continuous' | 'split' | null;
+  breakType?: 'continuous' | 'split' | 'block' | null;
   breakMinutes?: number;
+  /** Blocos de pausa concluídos no dia (timestamps reais) — Art. 7 Reg. 561/2006 */
+  breakBlocks?: Array<{ start: string; end: string }> | null;
   events: WorkDayEvent[];
   drivingSessions?: DrivingSession[];
   // Campos calculados devolvidos pela API

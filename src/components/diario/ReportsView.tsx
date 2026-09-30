@@ -260,7 +260,7 @@ export function ReportsView({
                 </div>
                 <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
                   <span>Condução contínua</span>
-                  <Badge>4h30 → pausa 45min</Badge>
+                  <Badge>4h30 → pausa 45min (15+30)</Badge>
                 </div>
                 <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
                   <span>Descanso diário</span>

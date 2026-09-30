@@ -154,7 +154,7 @@ export async function PUT(
       dataToUpdate.breakStart = parsedBreakStart;
     }
     if (body.breakType !== undefined) {
-      if (body.breakType !== null && body.breakType !== '' && !['continuous', 'split'].includes(body.breakType)) {
+      if (body.breakType !== null && body.breakType !== '' && !['part1', 'part2', 'continuous', 'split'].includes(body.breakType)) {
         return NextResponse.json({ error: 'Tipo de pausa inválido' }, { status: 400 });
       }
       dataToUpdate.breakType = body.breakType || null;

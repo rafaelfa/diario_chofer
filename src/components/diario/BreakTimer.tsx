@@ -3,39 +3,37 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Clock, Coffee, Play, CheckCircle2, Timer, AlertTriangle } from 'lucide-react';
+import { Coffee, Play, CheckCircle2, Pause, AlertTriangle } from 'lucide-react';
 
-export type BreakType = 'none' | 'continuous' | 'split';
+export type BreakType = 'none' | 'part1' | 'part2';
 
 interface BreakTimerProps {
   /** ISO string ou Date do início da pausa */
   breakStartTime: Date | null;
   breakType: BreakType;
-  onBreakTypeSelect: (type: 'continuous' | 'split') => void;
+  onBreakTypeSelect: (type: 'part1' | 'part2') => void;
   onResume: () => void;
+  /** Minutos de pausas já concluídos no dia (para o total legal de 45 min) */
+  completedBreakMinutes?: number;
 }
 
-const CONTINUOUS_SECONDS = 45 * 60; // 45 minutos
-const SPLIT_PHASE1_SECONDS = 15 * 60; // 1ª pausa: 15 minutos
-const SPLIT_PHASE2_SECONDS = 30 * 60; // 2ª pausa: 30 minutos
+// Reg. CE 561/2006, Art. 7º — nova lógica de pausa obrigatória:
+// após 4h30 de condução, pausa mínima de 45 minutos.
+// Pode ser dividida em duas partes: 15 min + 30 min (totalizando 45 min).
+const PART1_SECONDS = 15 * 60; // 1ª parte: 15 minutos
+const PART2_SECONDS = 30 * 60; // 2ª parte: 30 minutos
+const TOTAL_REQUIRED_SECONDS = 45 * 60; // mínimo legal total: 45 minutos
 
-export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onResume }: BreakTimerProps) {
+export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onResume, completedBreakMinutes = 0 }: BreakTimerProps) {
   const [remaining, setRemaining] = useState(0);
-  const [phase, setPhase] = useState<1 | 2>(1);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resumedEarlyRef = useRef(false);
 
-  const getTargetSeconds = useCallback((bt: BreakType, ph: 1 | 2) => {
-    if (bt === 'continuous') return CONTINUOUS_SECONDS;
-    return ph === 1 ? SPLIT_PHASE1_SECONDS : SPLIT_PHASE2_SECONDS;
+  const getTargetSeconds = useCallback((bt: BreakType) => {
+    return bt === 'part2' ? PART2_SECONDS : PART1_SECONDS;
   }, []);
 
-  const getPhaseTotal = useCallback((bt: BreakType, ph: 1 | 2) => {
-    if (bt === 'continuous') return CONTINUOUS_SECONDS;
-    return ph === 1 ? SPLIT_PHASE1_SECONDS : SPLIT_PHASE2_SECONDS;
-  }, []);
-
-  // Cronômetro principal
+  // Cronômetro principal — conta os minutos da parte selecionada (15 ou 30)
   useEffect(() => {
     if (!breakStartTime) {
       return;
@@ -46,24 +44,8 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
 
       const now = Date.now();
       const elapsed = Math.floor((now - breakStartTime.getTime()) / 1000);
-      let target = getTargetSeconds(breakType, phase);
-
-      if (breakType === 'split') {
-        if (phase === 1 && elapsed >= SPLIT_PHASE1_SECONDS) {
-          // Mudar para fase 2
-          setPhase(2);
-          target = SPLIT_PHASE2_SECONDS;
-          const phase2Elapsed = elapsed - SPLIT_PHASE1_SECONDS;
-          setRemaining(Math.max(0, target - phase2Elapsed));
-        } else if (phase === 2) {
-          const phase2Elapsed = elapsed - SPLIT_PHASE1_SECONDS;
-          setRemaining(Math.max(0, target - phase2Elapsed));
-        } else {
-          setRemaining(Math.max(0, target - elapsed));
-        }
-      } else {
-        setRemaining(Math.max(0, target - elapsed));
-      }
+      const target = getTargetSeconds(breakType);
+      setRemaining(Math.max(0, target - elapsed));
     };
 
     tick();
@@ -72,7 +54,7 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [breakStartTime, breakType, phase, getTargetSeconds]);
+  }, [breakStartTime, breakType, getTargetSeconds]);
 
   // Formatar MM:SS
   const formatTime = (seconds: number): string => {
@@ -82,8 +64,14 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
   };
 
   const isComplete = remaining <= 0 && breakStartTime !== null;
-  const phaseTotal = getPhaseTotal(breakType, phase);
-  const percentage = phaseTotal > 0 ? Math.min(((phaseTotal - remaining) / phaseTotal) * 100, 100) : 0;
+  const partTotal = getTargetSeconds(breakType);
+  const percentage = partTotal > 0 ? Math.min(((partTotal - remaining) / partTotal) * 100, 100) : 0;
+
+  // Progresso do total legal de 45 min (partes concluídas + tempo desta parte)
+  const secondsThisPart = partTotal - remaining;
+  const totalLegalSeconds = Math.min(completedBreakMinutes * 60 + Math.max(secondsThisPart, 0), TOTAL_REQUIRED_SECONDS);
+  const totalPercentage = Math.min((totalLegalSeconds / TOTAL_REQUIRED_SECONDS) * 100, 100);
+  const isFullyComplete = totalLegalSeconds >= TOTAL_REQUIRED_SECONDS;
 
   // Cores baseadas no tempo restante
   const getColor = () => {
@@ -115,21 +103,24 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
           </p>
           <div className="space-y-3 pt-1 sm:pt-2">
             <Button
-              onClick={() => onBreakTypeSelect('continuous')}
+              onClick={() => onBreakTypeSelect('part1')}
               className="w-full h-12 sm:h-14 bg-blue-600 hover:bg-blue-700 text-base font-bold"
             >
-              <Clock className="h-5 w-5 mr-2" />
-              45 min Contínua
+              <Pause className="h-5 w-5 mr-2" />
+              1ª parte: 15 min
             </Button>
             <Button
-              onClick={() => onBreakTypeSelect('split')}
+              onClick={() => onBreakTypeSelect('part2')}
               variant="outline"
               className="w-full h-12 sm:h-14 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700 text-base font-bold"
             >
-              <Timer className="h-5 w-5 mr-2" />
-              Dividir: 15min + 30min
+              <Coffee className="h-5 w-5 mr-2" />
+              2ª parte: 30 min
             </Button>
           </div>
+          <p className="text-[10px] sm:text-xs text-muted-foreground">
+            A pausa pode ser dividida em duas partes: 15 min + 30 min (total de 45 min).
+          </p>
         </div>
       </Card>
     );
@@ -152,34 +143,29 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
           )}
         </div>
 
-        {/* Info da fase */}
-        {breakType === 'split' && (
-          <div className="flex items-center justify-center gap-2">
-            <span className={`text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 rounded-full ${
-              phase === 1
-                ? (remaining > 0 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 line-through')
-                : (remaining > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 line-through')
-            }`}>
-              1ª Pausa: 15min
-            </span>
-            {phase === 2 && remaining > 0 && (
-              <span className="text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                2ª Pausa: 30min
-              </span>
-            )}
-            {phase === 2 && remaining <= 0 && (
-              <span className="text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                2ª Pausa: 30min ✓
-              </span>
-            )}
-          </div>
-        )}
+        {/* Info da parte da pausa (divisão 15 + 30) */}
+        <div className="flex items-center justify-center gap-2 flex-wrap">
+          <span className={`text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 rounded-full ${
+            breakType === 'part1'
+              ? (remaining > 0 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300')
+              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+          }`}>
+            1ª parte: 15min {breakType === 'part2' || (breakType === 'part1' && remaining <= 0) ? '✓' : ''}
+          </span>
+          <span className={`text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 rounded-full ${
+            breakType === 'part2'
+              ? (remaining > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300')
+              : (remaining <= 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')
+          }`}>
+            2ª parte: 30min {breakType === 'part2' && remaining <= 0 ? '✓' : ''}
+          </span>
+        </div>
 
-        {breakType === 'continuous' && !isComplete && (
-          <p className="text-[10px] sm:text-xs font-medium text-muted-foreground">
-            Pausa contínua de 45 minutos
-          </p>
-        )}
+        <p className="text-[10px] sm:text-xs font-medium text-muted-foreground">
+          {breakType === 'part1'
+            ? 'Pausa dividida — 1ª parte de 15 minutos'
+            : 'Pausa dividida — 2ª parte de 30 minutos'}
+        </p>
 
         {/* Cronômetro */}
         <div className="py-2 sm:py-3">
@@ -188,7 +174,7 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
           </p>
         </div>
 
-        {/* Barra de progresso */}
+        {/* Barra de progresso — parte atual */}
         {!isComplete && (
           <div className="h-2 sm:h-3 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
             <div
@@ -197,6 +183,20 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
             />
           </div>
         )}
+
+        {/* Progresso do total legal de 45 minutos */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-[10px] sm:text-xs text-muted-foreground">
+            <span>Total da pausa obrigatória</span>
+            <span className="font-bold">{Math.floor(totalLegalSeconds / 60)} / 45 min</span>
+          </div>
+          <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-1000 ${isFullyComplete ? 'bg-emerald-500' : 'bg-blue-500'}`}
+              style={{ width: `${totalPercentage}%` }}
+            />
+          </div>
+        </div>
 
         {/* Alerta quando falta pouco */}
         {remaining > 0 && remaining <= 300 && (
@@ -208,11 +208,28 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
           </div>
         )}
 
-        {/* Completa */}
-        {isComplete && (
+        {/* Parte concluída, falta a 2ª parte */}
+        {isComplete && breakType === 'part1' && !isFullyComplete && (
+          <div className="p-2 sm:p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 space-y-2">
+            <p className="text-xs sm:text-sm font-medium text-blue-700 dark:text-blue-300">
+              1ª parte concluída! Conduza até 4h30 e faça a 2ª parte de 30 minutos.
+            </p>
+            <Button
+              onClick={() => onBreakTypeSelect('part2')}
+              variant="outline"
+              className="w-full h-10 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700 font-bold"
+            >
+              <Coffee className="h-4 w-4 mr-2" />
+              Fazer 2ª parte agora (30 min)
+            </Button>
+          </div>
+        )}
+
+        {/* Pausa obrigatória totalmente cumprida */}
+        {isComplete && isFullyComplete && (
           <div className="p-2 sm:p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
             <p className="text-xs sm:text-sm font-medium text-emerald-700 dark:text-emerald-300">
-              Pausa obrigatória cumprida! Pode retomar a condução.
+              Pausa obrigatória cumprida (45 min)! Pode retomar a condução.
             </p>
           </div>
         )}
@@ -221,16 +238,16 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
         <Button
           onClick={handleResume}
           className={`w-full h-12 sm:h-14 text-base sm:text-lg font-bold shadow-lg ${
-            isComplete
+            isFullyComplete
               ? 'bg-emerald-600 hover:bg-emerald-700'
               : 'bg-amber-600 hover:bg-amber-700'
           }`}
         >
           <Play className="h-5 w-5 mr-2" />
-          {isComplete ? 'RETOMAR CONDUÇÃO' : 'RETOMAR (pausa incompleta)'}
+          {isFullyComplete ? 'RETOMAR CONDUÇÃO' : 'RETOMAR (pausa incompleta)'}
         </Button>
 
-        {!isComplete && (
+        {!isFullyComplete && (
           <p className="text-[9px] sm:text-[10px] text-muted-foreground text-center">
             Pode retomar antes do tempo, mas a pausa legal de 45min não ficará cumprida.
           </p>

@@ -42,7 +42,8 @@ export interface WorkDay {
   timezone?: string | null;
   utcOffset?: string | null;
   breakStart?: string | null;
-  breakType?: 'continuous' | 'split' | null;
+  /** 'part1' = 1ª parte de 15min | 'part2' = 2ª parte de 30min (aceita legados 'continuous'/'split') */
+  breakType?: 'part1' | 'part2' | 'continuous' | 'split' | null;
   breakMinutes?: number;
   events: WorkDayEvent[];
   drivingSessions?: DrivingSession[];

@@ -75,7 +75,7 @@ interface MainViewProps {
   /** Total de minutos de pausa (concluídas + em curso) — v4.1.5 */
   breakMinutes: number;
   onOpenBreak: () => void;
-  onStartBreak: (type: 'continuous' | 'split') => void;
+  onStartBreak: (type: 'part1' | 'part2') => void;
   onEndBreak: () => void;
 }
 
@@ -379,6 +379,7 @@ export function MainView({
               breakType={breakState.type}
               onBreakTypeSelect={onStartBreak}
               onResume={onEndBreak}
+              completedBreakMinutes={breakState.completedBreakMinutes}
             />
           </div>
         )}
@@ -482,6 +483,7 @@ export function MainView({
                   breakType={breakState.type}
                   onBreakTypeSelect={onStartBreak}
                   onResume={onEndBreak}
+                  completedBreakMinutes={breakState.completedBreakMinutes}
                 />
               </div>
             ) : currentDay.isPaused && currentDay.numDrivers === 2 ? (

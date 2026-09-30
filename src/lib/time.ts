@@ -160,12 +160,20 @@ export function computeBreakPhase(elapsedMinutes: number, hadPhase15: boolean): 
   return { phase: 'awaiting15', remainingRequiredMinutes: 45 };
 }
 
-/** Tempo total de pausa que deve ser DESCONTADO da condução até agora. */
+/**
+ * Tempo total de pausa que deve ser DESCONTADO da condução até agora.
+ * Regra do botão único: cada BLOCO conta apenas pelo bloco completo mais baixo:
+ *   - <15 min → 0 (não conta);
+ *   - 15–44 min → 15 (fase 1);
+ *   - ≥45 min → 45 (pausa contínua).
+ * Na fase 2 (após a fase 1), só um bloco contínuo ≥30 conta (+30).
+ */
 export function creditedBreakMinutes(elapsedMinutes: number, hadPhase15: boolean): number {
-  const info = computeBreakPhase(elapsedMinutes, hadPhase15);
-  if (info.phase === 'done') return hadPhase15 ? 30 : 45;
-  if (info.phase === 'awaiting30' && hadPhase15) return 15; // fase 1 já ganha 15 min
-  return 0; // pausa em curso ainda não é válida — não desconta
+  const m = Math.max(0, Math.floor(elapsedMinutes));
+  if (hadPhase15) return m >= 30 ? 45 : 15;
+  if (m >= 45) return 45;
+  if (m >= 15) return 15;
+  return 0;
 }
 
 /** Minutos de pausa concluídos e válidos ganhos ao terminar um bloco. */
@@ -177,6 +185,29 @@ export function gainedBreakMinutes(elapsedMinutes: number, hadPhase15: boolean):
     return 0;
   }
   return m >= 30 ? 30 : 0;
+}
+
+/**
+ * Estado persistido após TERMINAR um bloco de pausa.
+ *  - Bloco ≥45 sem fase 1 → pausa cumprida (zera tudo).
+ *  - Bloco 15–44 sem fase 1 → fase 1 ganha, exige bloco contínuo ≥30.
+ *  - Bloco ≥30 com fase 1 → pausa dividida cumprida (zera tudo).
+ *  - Bloco <15 (sem fase 1) ou <30 (com fase 1) → NÃO contabiliza nada;
+ *    mantém o estado anterior (fase 1 continua por cumprir se existia).
+ */
+export function nextBreakState(
+  elapsedMinutes: number,
+  hadPhase15: boolean
+): { hadPhase15: boolean; completedBreakMinutes: number; fullyDone: boolean } {
+  const m = Math.max(0, Math.floor(elapsedMinutes));
+  if (hadPhase15) {
+    return m >= 30
+      ? { hadPhase15: false, completedBreakMinutes: 45, fullyDone: true }
+      : { hadPhase15: true, completedBreakMinutes: 0, fullyDone: false };
+  }
+  if (m >= 45) return { hadPhase15: false, completedBreakMinutes: 45, fullyDone: true };
+  if (m >= 15) return { hadPhase15: true, completedBreakMinutes: 15, fullyDone: false };
+  return { hadPhase15: false, completedBreakMinutes: 0, fullyDone: false };
 }
 
 /** Rótulo do estado actual para mostrar no botão de pausa. */

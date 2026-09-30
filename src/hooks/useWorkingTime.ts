@@ -26,22 +26,18 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
 
   /**
    * Calcula o total de minutos de pausa VÁLIDOS que devem ser subtraídos.
-   * Inclui:
-   *   - Pausas já concluídas e válidas (completedBreakMinutes)
-   *   - Pausa activa em curso — só desconta se for válida segundo o Reg. 561:
-   *       • bloco ≥45 min contínuos, OU
-   *       • fase 1 ≥15 min (desconta 15) seguida de fase 2 ≥30 min (desconta +30).
-   *   Blocos inválidos (<15 sem fase 1; <30 com fase 1 cumprida) não descontam.
+   * Regra do botão único (Reg. CE 561/2006, Art. 7): só contam blocos de
+   * 45 min contínuos OU 15 + 30 contínuos; blocos fora disso não descontam.
    */
   const getBreakMinutes = useCallback((): number => {
-    let total = breakState?.completedBreakMinutes ?? currentDay?.breakMinutes ?? 0;
+    const completed = breakState?.completedBreakMinutes ?? currentDay?.breakMinutes ?? 0;
 
     if (breakState?.isActive && breakState.startTime && now) {
       const elapsed = Math.floor((now.getTime() - breakState.startTime.getTime()) / 60000);
-      total += creditedBreakMinutes(elapsed, !!breakState.hadPhase15);
+      return Math.max(completed, 0) + creditedBreakMinutes(elapsed, !!breakState.hadPhase15);
     }
 
-    return Math.max(total, 0);
+    return Math.max(completed, 0);
   }, [breakState, currentDay?.breakMinutes, now]);
 
   const calculateWorkingTime = useCallback((): WorkingTimeResult => {

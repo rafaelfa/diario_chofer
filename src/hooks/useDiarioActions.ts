@@ -22,7 +22,7 @@ import { useDayForms } from '@/hooks/useDayForms';
 import { useDialogManager } from '@/hooks/useDialogManager';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import type { WorkDay, ActiveView } from '@/lib/types';
-import { computeBreakPhase, gainedBreakMinutes } from '@/lib/time';
+import { computeBreakPhase, nextBreakState } from '@/lib/time';
 import { logError } from '@/lib/logger';
 import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
 import { validateMatricula } from '@/lib/validators';
@@ -593,13 +593,16 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         };
       });
     } else {
-      setBreakState({
+      setBreakState(prev => ({
         isActive: false,
         startTime: null,
         type: 'none',
-        hadPhase15: false,
+        // Conserva a fase 1 pendente se já estava no estado local OU se o
+        // registo no banco indica pausa dividida por cumprir ('split').
+        // Assim um refresh não apaga o "faltam 30 min".
+        hadPhase15: prev.hadPhase15 || currentDay.breakType === 'split',
         completedBreakMinutes: currentDay.breakMinutes ?? 0,
-      });
+      }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDay?.id, currentDay?.breakStart, currentDay?.breakType]);
@@ -609,15 +612,15 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     // Terminar pausa em curso
     if (breakState.isActive && breakState.startTime) {
       const elapsed = Math.max(Math.floor((Date.now() - breakState.startTime.getTime()) / 60000), 0);
-      const gained = gainedBreakMinutes(elapsed, breakState.hadPhase15);
-      const nowHadPhase15 = breakState.hadPhase15 ? elapsed >= 30 : elapsed >= 15 && elapsed < 45;
+      const next = nextBreakState(elapsed, breakState.hadPhase15);
+      const gained = next.completedBreakMinutes;
       const completedBreakMinutes = breakState.completedBreakMinutes + gained;
 
       setBreakState({
         isActive: false,
         startTime: null,
         type: 'none',
-        hadPhase15: nowHadPhase15,
+        hadPhase15: next.hadPhase15,
         completedBreakMinutes,
       });
 
@@ -626,19 +629,26 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
           if (currentDay) {
             await saveBreakState(currentDay.id, {
               breakStart: null,
-              breakType: nowHadPhase15 ? 'split' : null,
+              breakType: next.hadPhase15 ? 'split' : null,
               breakMinutes: completedBreakMinutes,
             });
           }
-          if (gained > 0) {
+          if (next.fullyDone) {
             showToast(
-              nowHadPhase15 && !breakState.hadPhase15
-                ? `Pausa de ${elapsed} min registada (fase 1). Faltam 30 min contínuos.`
-                : 'Pausa obrigatória cumprida!',
+              breakState.hadPhase15
+                ? 'Pausa dividida cumprida (15 + 30)! ✓'
+                : 'Pausa contínua de 45 min cumprida! ✓',
               'success'
             );
+          } else if (gained > 0) {
+            showToast(`Pausa de ${elapsed} min registada como fase 1 (15 min). Faltam 30 min contínuos.`, 'success');
           } else {
-            showToast(`Pausa de ${elapsed} min não é válida — não foi contabilizada.`, 'warning');
+            showToast(
+              breakState.hadPhase15
+                ? `Pausa de ${elapsed} min não atingiu os 30 contínuos — não foi contabilizada.`
+                : `Pausa de ${elapsed} min não é válida — não foi contabilizada.`,
+              'warning'
+            );
           }
         } catch {
           showToast('Não foi possível salvar o fim da pausa. Verifique a conexão.', 'error');

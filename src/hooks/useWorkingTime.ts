@@ -13,9 +13,17 @@
 
 import { useCallback } from 'react';
 import type { WorkDay } from '@/lib/types';
-import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
+import {
+  calcDrivingMinutes,
+  minutesToFormatted,
+  parseStoredBreakBlocks,
+  requiredBreakPlan,
+  continuousDrivingSinceLastValidBreak,
+  MAX_CONTINUOUS_DRIVING_MINUTES,
+} from '@/lib/time';
 import { formatDatePt, getLocalTimeString } from '@/lib/timezone';
 import type { ConformityStatus, WorkingTimeResult, BreakState } from './useDiarioActions';
+import type { ContinuousDrivingInfo } from '@/components/diario/BreakStatusCard';
 
 export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakState, now: Date | null = null) {
   const formatTime = (time: string | null) => time || '--:--';
@@ -88,10 +96,72 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
     return { status: 'ok', message: `${total.formatted} de condução — OK` };
   }, [currentDay, calculateWorkingTime, getBreakMinutes]);
 
+  /**
+   * Calcula a condução contínua (limite legal de 4h30 — Reg. CE 561/2006, Art. 7)
+   * combinando:
+   *  - as sessões de condução do dia ("HH:MM" convertidos em Dates absolutos com
+   *    base na data do dia e no offset UTC do dia);
+   *  - os blocos de pausa persistidos (`currentDay.breakBlocks` via parseStoredBreakBlocks)
+   *    juntando os blocos concluídos locais (breakState.completedBlocks);
+   *  - o plano obrigatório de pausa (requiredBreakPlan: 45 min contínuos OU 15+30);
+   *  - a pausa em curso (startTime de breakState), que congela o contador.
+   */
+  const getContinuousDrivingInfo = useCallback((): ContinuousDrivingInfo | null => {
+    if (!currentDay?.startTime || currentDay.endTime) return null;
+
+    const referenceNow = now ?? new Date();
+
+    // Blocos persistidos + blocos locais ainda não gravados (sem duplicar).
+    const storedBlocks = parseStoredBreakBlocks(currentDay.breakBlocks);
+    const localBlocks = breakState?.completedBlocks ?? [];
+    const seen = new Set(storedBlocks.map(b => `${b.start}|${b.end}`));
+    const blocks = [...storedBlocks, ...localBlocks.filter(b => !seen.has(`${b.start}|${b.end}`))];
+
+    const plan = requiredBreakPlan(blocks);
+
+    // Pausa em curso: o contador de condução contínua está congelado.
+    if (breakState?.isActive && breakState.startTime) {
+      return {
+        continuousMinutes: continuousDrivingSinceLastValidBreak(
+          currentDay.drivingSessions ?? [],
+          currentDay.date,
+          currentDay.utcOffset,
+          blocks,
+          breakState.startTime
+        ),
+        limitMinutes: MAX_CONTINUOUS_DRIVING_MINUTES,
+        hasValidBreak: plan.hasValidBreak,
+        mode: plan.mode,
+        breakRequired: false,
+        approachingLimit: false,
+      };
+    }
+
+    const continuousMinutes = continuousDrivingSinceLastValidBreak(
+      currentDay.drivingSessions ?? [],
+      currentDay.date,
+      currentDay.utcOffset,
+      blocks,
+      referenceNow
+    );
+
+    return {
+      continuousMinutes,
+      limitMinutes: MAX_CONTINUOUS_DRIVING_MINUTES,
+      hasValidBreak: plan.hasValidBreak,
+      mode: plan.mode,
+      breakRequired: continuousMinutes >= MAX_CONTINUOUS_DRIVING_MINUTES,
+      approachingLimit:
+        continuousMinutes >= MAX_CONTINUOUS_DRIVING_MINUTES - 30 &&
+        continuousMinutes < MAX_CONTINUOUS_DRIVING_MINUTES,
+    };
+  }, [currentDay, breakState, now]);
+
   return {
     calculateWorkingTime,
     getBreakMinutes,
     getConformityStatus,
+    getContinuousDrivingInfo,
     formatTime,
     formatDate,
   };

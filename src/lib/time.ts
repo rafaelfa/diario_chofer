@@ -171,6 +171,276 @@ export function getTotalBreakMinutes(
   return completed + activeMinutes;
 }
 
+// ─── Limite de condução contínua de 4h30 (Reg. CE 561/2006, Art. 7) ──────────
+
+/** Limite legal de condução contínua: 4h30 = 270 minutos */
+export const MAX_CONTINUOUS_DRIVING_MINUTES = 270;
+/** Pausa obrigatória mínima: 45 min contínuos OU 15 min + 30 min (total 45) */
+export const REQUIRED_BREAK_MINUTES = 45;
+export const SPLIT_BREAK_PHASE1_MINUTES = 15;
+export const SPLIT_BREAK_PHASE2_MINUTES = 30;
+
+/** Bloco de pausa com timestamps reais (persistido como JSON em WorkDay.breakBlocks) */
+export interface BreakBlock {
+  /** ISO string do início da pausa */
+  start: string;
+  /** ISO string do fim da pausa */
+  end: string;
+  /** Duração em minutos */
+  minutes: number;
+}
+
+/** Plano de pausa necessário para cumprir o Art. 7 */
+export interface RequiredBreakPlan {
+  /** true se já existe uma pausa válida que renova o ciclo de condução */
+  hasValidBreak: boolean;
+  /** 'continuous' (45min), 'split' (15+30) ou null se ainda não há pausas */
+  mode: 'continuous' | 'split' | null;
+  /** Minutos válidos contabilizados desde a última pausa renovadora */
+  validMinutes: number;
+  /** Quantos minutos faltam para perfazer os 45 min obrigatórios (0 se cumprido) */
+  remainingMinutes: number;
+  /** true se os 45 minutos obrigatórios já foram cumpridos */
+  isSatisfied: boolean;
+}
+
+/**
+ * Converte um valor desconhecido (vindo do banco ou de JSON string) numa lista
+ * de blocos de pausa válidos. Blocos inválidos (sem start/end ISO, com end < start,
+ * com minutes <= 0 ou inconsistentes com os timestamps) são rejeitados.
+ * Aceita: array já parseado, string JSON, ou null/undefined.
+ */
+export function parseStoredBreakBlocks(value: unknown): BreakBlock[] {
+  let parsed: unknown = value;
+
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  const blocks: BreakBlock[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue;
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.start !== 'string' || typeof candidate.end !== 'string') continue;
+
+    const start = new Date(candidate.start);
+    const end = new Date(candidate.end);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
+    if (end.getTime() < start.getTime()) continue;
+
+    const elapsedMinutes = Math.floor((end.getTime() - start.getTime()) / 60000);
+    const rawMinutes = Number(candidate.minutes);
+    const minutes = Number.isFinite(rawMinutes) && rawMinutes >= 0
+      ? Math.min(Math.floor(rawMinutes), elapsedMinutes)
+      : elapsedMinutes;
+    if (minutes <= 0) continue;
+
+    blocks.push({ start: start.toISOString(), end: end.toISOString(), minutes });
+  }
+  return blocks;
+}
+
+/**
+ * Remove blocos duplicados (mesmo start+end). Mantém a primeira ocorrência e
+ * ordena por data de início para garantir cálculos determinísticos.
+ */
+export function dedupeBreakBlocks(blocks: BreakBlock[]): BreakBlock[] {
+  const seen = new Set<string>();
+  const unique: BreakBlock[] = [];
+  for (const block of blocks) {
+    const key = `${block.start}|${block.end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(block);
+  }
+  return unique.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+}
+
+/**
+ * Determina o plano de pausa obrigatório (45min contínuos OU 15+30 divididos)
+ * a partir dos blocos de pausa registados.
+ *
+ * Regras (Reg. CE 561/2006, Art. 7):
+ *  - Um bloco único >= 45 min é uma pausa contínua válida e renova o ciclo.
+ *  - Dois blocos (>=15 min seguido de >=30 min) contam em conjunto (15+30=45).
+ *  - Blocos inferiores a 15 min não contam isoladamente.
+ *  - Uma pausa válida "renova" o contador: só os blocos posteriores contam.
+ */
+export function requiredBreakPlan(blocks: BreakBlock[]): RequiredBreakPlan {
+  const sorted = dedupeBreakBlocks(blocks);
+
+  // A pausa renovadora relevante é a MAIS RECENTE (renovação múltipla).
+  //  1) Última pausa contínua válida (>= 45 min).
+  //  2) Última combinação split: bloco >=15 min seguido de bloco >=30 min.
+  let lastContinuousEnd: number | null = null;
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    if (sorted[i].minutes >= REQUIRED_BREAK_MINUTES) {
+      lastContinuousEnd = new Date(sorted[i].end).getTime();
+      break;
+    }
+  }
+
+  let lastSplitEnd: number | null = null;
+  for (let i = sorted.length - 1; i >= 1; i--) {
+    const second = sorted[i];
+    const first = sorted[i - 1];
+    if (second.minutes >= SPLIT_BREAK_PHASE2_MINUTES && first.minutes >= SPLIT_BREAK_PHASE1_MINUTES) {
+      lastSplitEnd = new Date(second.end).getTime();
+      break;
+    }
+  }
+
+  if (lastContinuousEnd !== null || lastSplitEnd !== null) {
+    // Escolhe a renovação com término mais recente; em empate, a contínua.
+    const mode: 'continuous' | 'split' =
+      lastSplitEnd !== null && lastContinuousEnd !== null && lastSplitEnd > lastContinuousEnd
+        ? 'split'
+        : lastContinuousEnd !== null
+          ? 'continuous'
+          : 'split';
+    return {
+      hasValidBreak: true,
+      mode,
+      validMinutes: REQUIRED_BREAK_MINUTES,
+      remainingMinutes: 0,
+      isSatisfied: true,
+    };
+  }
+
+  // 3) Nenhum plano completo ainda — acumula os blocos desde a última
+  //    oportunidade de renovação (blocos >=15 min reiniciam a fase 1).
+  let validMinutes = 0;
+  for (const block of sorted) {
+    if (block.minutes >= SPLIT_BREAK_PHASE1_MINUTES) {
+      // Novo bloco elegível para fase 1: substitui tentativas anteriores.
+      validMinutes = block.minutes;
+    } else if (validMinutes >= SPLIT_BREAK_PHASE1_MINUTES && block.minutes >= SPLIT_BREAK_PHASE2_MINUTES) {
+      validMinutes += block.minutes;
+    } else if (validMinutes > 0) {
+      validMinutes += block.minutes;
+    }
+  }
+
+  const remaining = Math.max(0, REQUIRED_BREAK_MINUTES - validMinutes);
+  return {
+    hasValidBreak: validMinutes > 0,
+    mode: validMinutes > 0 ? 'split' : null,
+    validMinutes,
+    remainingMinutes: remaining,
+    isSatisfied: false,
+  };
+}
+
+/**
+ * Calcula os minutos de condução contínua desde a última pausa válida.
+ *
+ * @param sessions   Sessões de condução ({startTime, endTime} em "HH:MM", status)
+ * @param dayDateStr Data do dia (ISO string ou "YYYY-MM-DD") — usada para construir
+ *                   os Dates absolutos a partir das horas "HH:MM" no fuso dado.
+ * @param utcOffset  Offset UTC do dia (ex: "+01:00"); fallback para UTC.
+ * @param blocks     Blocos de pausa persistidos (breakBlocks)
+ * @param now        Instante atual
+ * @returns número de minutos de condução acumulados desde a última pausa válida
+ *          (>= 45 min contínuos ou combinação 15+30). Se existir pausa válida,
+ *          conta apenas o tempo conduzido após o FIM dessa pausa.
+ */
+export function continuousDrivingSinceLastValidBreak(
+  sessions: Array<{ startTime?: string | null; endTime?: string | null; status?: string }>,
+  dayDateStr: string | null | undefined,
+  utcOffset: string | null | undefined,
+  blocks: BreakBlock[],
+  now: Date = new Date()
+): number {
+  const plan = requiredBreakPlan(blocks);
+
+  // Determinar o instante de referência: fim da última pausa válida, ou null.
+  let referenceEnd: number | null = null;
+  const sorted = dedupeBreakBlocks(blocks);
+
+  if (plan.mode === 'continuous') {
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      if (sorted[i].minutes >= REQUIRED_BREAK_MINUTES) {
+        referenceEnd = new Date(sorted[i].end).getTime();
+        break;
+      }
+    }
+  } else if (plan.mode === 'split' && plan.isSatisfied) {
+    for (let i = sorted.length - 1; i >= 1; i--) {
+      if (sorted[i].minutes >= SPLIT_BREAK_PHASE2_MINUTES && sorted[i - 1].minutes >= SPLIT_BREAK_PHASE1_MINUTES) {
+        referenceEnd = new Date(sorted[i].end).getTime();
+        break;
+      }
+    }
+  }
+
+  // Construir um Date absoluto a partir de "HH:MM" na data do dia, no fuso utcOffset.
+  const toDate = (hhmm: string): Date | null => {
+    const minutes = parseTimeToMinutes(hhmm);
+    if (minutes === null) return null;
+
+    let baseMs: number;
+    if (dayDateStr) {
+      const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(dayDateStr)
+        ? dayDateStr
+        : dayDateStr.slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null;
+      // Meia-noite local (no fuso do dia) interpretada como UTC…
+      baseMs = new Date(`${dateOnly}T00:00:00.000Z`).getTime();
+    } else {
+      const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      baseMs = today.getTime();
+    }
+
+    // …a hora local "HH:MM" corresponde a esse instante MENOS o offset UTC.
+    // Ex: offset +01:00 → "08:00" local = 07:00 UTC.
+    const match = /^([+-])(\d{2}):(\d{2})$/.exec(utcOffset || '');
+    const offsetMinutes = match
+      ? (match[1] === '+' ? 1 : -1) * (Number(match[2]) * 60 + Number(match[3]))
+      : 0;
+    return new Date(baseMs + minutes * 60000 - offsetMinutes * 60000);
+  };
+
+  let total = 0;
+  for (const session of sessions) {
+    if (!session.startTime) continue;
+    const start = toDate(session.startTime);
+    if (!start) continue;
+
+    let end: Date | null;
+    if (session.endTime) {
+      end = toDate(session.endTime);
+      if (end && end.getTime() < start.getTime()) {
+        // Passagem de meia-noite: sessão terminou no dia seguinte.
+        end = new Date(end.getTime() + 24 * 60 * 60000);
+      }
+    } else if (session.status === 'active') {
+      end = now;
+    } else {
+      continue;
+    }
+    if (!end) continue;
+
+    let startMs = start.getTime();
+    let endMs = Math.min(end.getTime(), now.getTime());
+    if (endMs <= startMs) continue;
+
+    if (referenceEnd !== null) {
+      // Contar apenas o conduzo APÓS a última pausa válida.
+      if (endMs <= referenceEnd) continue;
+      startMs = Math.max(startMs, referenceEnd);
+    }
+    total += Math.floor((endMs - startMs) / 60000);
+  }
+
+  return Math.max(0, total);
+}
+
 export function calcWorkDayHours(
   workDay: {
     startTime?: string | null;

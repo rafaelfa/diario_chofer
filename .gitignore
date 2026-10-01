@@ -1,11 +1,14 @@
+# Dependencies
 node_modules/
+
+# Next.js build output
 .next/
 out/
-build/
+
+# Production build
 dist/
-coverage/
-.vercel/
-*.log
-*.tsbuildinfo
-.env*
-!.env.example
+build/
+
+# Misc
+.DS_Store
+*.pem

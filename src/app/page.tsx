@@ -48,7 +48,7 @@ export default function DiarioMotorista() {
     showPauseDialog, setShowPauseDialog, pauseKm, setPauseKm, isProcessingPause,
     breakState,
     breakMinutes,
-    conformity, workingTime,
+    conformity, workingTime, continuousDrivingInfo,
     isStarting, isEnding,
     handleStartDay, handleEndDay, handleAddEvent,
     handlePauseDriving, handleResumeDriving, handleOpenPauseDialog, handleConfirmResume,
@@ -96,6 +96,7 @@ export default function DiarioMotorista() {
             weeklyReport={weeklyReport}
             conformity={conformity}
             workingTime={workingTime}
+            continuousDrivingInfo={continuousDrivingInfo}
             startForm={startForm}
             setStartForm={setStartForm}
             endForm={endForm}

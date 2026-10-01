@@ -44,6 +44,7 @@ export function useDialogManager() {
     startTime: null,
     type: 'none',
     completedBreakMinutes: 0,
+    completedBlocks: [],
   });
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning') => {

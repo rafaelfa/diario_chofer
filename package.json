@@ -7,6 +7,7 @@
     "build": "prisma migrate deploy && next build && node scripts/prepare-standalone.mjs",
     "start": "node .next/standalone/server.js",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "test": "tsx --test src/lib/time.test.ts src/lib/regulation561.test.ts src/lib/timezone.test.ts",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",

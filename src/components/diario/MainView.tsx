@@ -23,6 +23,7 @@ import { DayTimeline } from '@/components/diario/DayTimeline';
 import { TrafficLightStatus } from '@/components/diario/TrafficLightStatus';
 import { WeeklyBars } from '@/components/diario/WeeklyBars';
 import { BreakTimer } from '@/components/diario/BreakTimer';
+import { validateBreakBlocks } from '@/lib/breakBlocks';
 import { WeeklyRestAlert } from '@/components/diario/WeeklyRestAlert';
 import type {
   ConformityStatus,
@@ -105,6 +106,15 @@ export function MainView({
   const startCountryInputRef = useRef<HTMLInputElement>(null);
   const startKmInputRef = useRef<HTMLInputElement>(null);
   const breakTimerRef = useRef<HTMLDivElement>(null);
+
+  // ─── Regra estrita de blocos (Art. 7º): blocos <15min são descartados ──────
+  // Se as pausas concluídas do dia não incluem um bloco válido ≥15min,
+  // o histórico de minutos válidos é zerado no botão único de pausa.
+  const validCompletedBreakMinutes = validateBreakBlocks(
+    breakState.completedBreakMinutes > 0
+      ? [{ startMs: 0, endMs: breakState.completedBreakMinutes * 60000 }]
+      : []
+  ).validMinutes;
 
   // Scroll to break timer when it appears on mobile
   useEffect(() => {
@@ -379,6 +389,7 @@ export function MainView({
               breakType={breakState.type}
               onBreakTypeSelect={onStartBreak}
               onResume={onEndBreak}
+              completedBreakMinutes={validCompletedBreakMinutes}
             />
           </div>
         )}
@@ -482,6 +493,7 @@ export function MainView({
                   breakType={breakState.type}
                   onBreakTypeSelect={onStartBreak}
                   onResume={onEndBreak}
+                  completedBreakMinutes={validCompletedBreakMinutes}
                 />
               </div>
             ) : currentDay.isPaused && currentDay.numDrivers === 2 ? (

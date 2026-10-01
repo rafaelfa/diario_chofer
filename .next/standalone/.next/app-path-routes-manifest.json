@@ -1,0 +1,23 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/auth/login/route": "/api/auth/login",
+  "/api/auth/logout/route": "/api/auth/logout",
+  "/api/auth/me/route": "/api/auth/me",
+  "/api/auth/register/route": "/api/auth/register",
+  "/api/driving-sessions/route": "/api/driving-sessions",
+  "/api/events/route": "/api/events",
+  "/api/matricula/lastkm/route": "/api/matricula/lastkm",
+  "/api/reports/matricula/route": "/api/reports/matricula",
+  "/api/reports/pdf/route": "/api/reports/pdf",
+  "/api/reports/pdf/veiculo/route": "/api/reports/pdf/veiculo",
+  "/api/reports/route": "/api/reports",
+  "/api/route": "/api",
+  "/api/veiculos/estatisticas/route": "/api/veiculos/estatisticas",
+  "/api/veiculos/historico/route": "/api/veiculos/historico",
+  "/api/workdays/[id]/route": "/api/workdays/[id]",
+  "/api/workdays/route": "/api/workdays",
+  "/login/page": "/login",
+  "/offline/page": "/offline",
+  "/page": "/"
+}

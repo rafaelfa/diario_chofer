@@ -1,11 +1,8 @@
-node_modules/
+# Next.js build artifacts
 .next/
-out/
-build/
-dist/
-coverage/
-.vercel/
-*.log
-*.tsbuildinfo
-.env*
-!.env.example
+
+# TypeScript build info
+tsconfig.tsbuildinfo
+
+# Patch files (if not intended for version control)
+*.patch

@@ -16,11 +16,13 @@ import {
 } from 'lucide-react';
 import type { WorkDay, Report } from '@/lib/types';
 import { formatDecimalHours } from '@/lib/time';
+import type { ContinuousDrivingInfo } from '@/components/diario/BreakStatusCard';
 import { MatriculaPlateInput } from '@/components/MatriculaPlateInput';
 import { AmplitudeCard } from '@/components/AmplitudeCard';
 import { CircularTimeCounter } from '@/components/diario/CircularTimeCounter';
 import { DayTimeline } from '@/components/diario/DayTimeline';
 import { TrafficLightStatus } from '@/components/diario/TrafficLightStatus';
+import { BreakStatusCard } from '@/components/diario/BreakStatusCard';
 import { WeeklyBars } from '@/components/diario/WeeklyBars';
 import { BreakTimer } from '@/components/diario/BreakTimer';
 import { WeeklyRestAlert } from '@/components/diario/WeeklyRestAlert';
@@ -42,6 +44,8 @@ interface MainViewProps {
   weeklyReport: Report | null;
   conformity: ConformityStatus;
   workingTime: WorkingTimeResult;
+  /** Condução contínua vs. limite de 4h30 (Reg. CE 561/2006, Art. 7) */
+  continuousDrivingInfo?: ContinuousDrivingInfo | null;
   startForm: StartFormState;
   setStartForm: React.Dispatch<React.SetStateAction<StartFormState>>;
   endForm: EndFormState;
@@ -80,7 +84,7 @@ interface MainViewProps {
 }
 
 export function MainView({
-  currentDay, workDays = [], isLoading, weeklyReport, conformity, workingTime,
+  currentDay, workDays = [], isLoading, weeklyReport, conformity, workingTime, continuousDrivingInfo = null,
   startForm, setStartForm,
   endForm, setEndForm,
   newEvent, setNewEvent,
@@ -462,6 +466,17 @@ export function MainView({
                   maxHours={9}
                   breakMinutes={breakMinutes}
                 />
+
+                {/* Indicador de condução contínua (limite 4h30) e pausa obrigatória */}
+                {currentDay.numDrivers === 1 && (
+                  <div className="mt-3">
+                    <BreakStatusCard
+                      info={continuousDrivingInfo}
+                      isOnBreak={breakState.isActive}
+                      onOpenBreak={onOpenBreak}
+                    />
+                  </div>
+                )}
 
                 <div className="mt-4">
                   <DayTimeline

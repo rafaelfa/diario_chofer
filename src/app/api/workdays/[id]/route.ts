@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { requireAuth } from '@/lib/auth';
-import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours, parseStoredBreakBlocks } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
 import { isValidTimeString, parseNonNegativeInteger, validateMatricula } from '@/lib/validators';
 
@@ -163,6 +163,20 @@ export async function PUT(
       const parsedBreakMinutes = parseNonNegativeInteger(body.breakMinutes);
       if (!parsedBreakMinutes.valid) return NextResponse.json({ error: 'Minutos de pausa inválidos' }, { status: 400 });
       dataToUpdate.breakMinutes = parsedBreakMinutes.value ?? 0;
+    }
+    if (body.breakBlocks !== undefined) {
+      // Aceita string JSON ou array já parseado; valida e normaliza os blocos.
+      const rawBlocks = body.breakBlocks;
+      if (rawBlocks === null || (typeof rawBlocks === 'string' && !rawBlocks.trim()) || (Array.isArray(rawBlocks) && rawBlocks.length === 0)) {
+        dataToUpdate.breakBlocks = Prisma.DbNull;
+      } else {
+        const parsedBlocks = parseStoredBreakBlocks(rawBlocks);
+        const hasInput = typeof rawBlocks === 'string' ? Boolean(rawBlocks.trim()) : Array.isArray(rawBlocks);
+        if (!hasInput || parsedBlocks.length === 0) {
+          return NextResponse.json({ error: 'Blocos de pausa inválidos' }, { status: 400 });
+        }
+        dataToUpdate.breakBlocks = parsedBlocks;
+      }
     }
 
     log('Dados a atualizar:', JSON.stringify(dataToUpdate, null, 2));

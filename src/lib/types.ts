@@ -22,6 +22,28 @@ export interface WorkDayEvent {
   description: string;
 }
 
+export interface BreakBlock {
+  /** Timestamp ISO do início do bloco de pausa */
+  start: string;
+  /** Timestamp ISO do fim do bloco ('' se ainda estiver em curso) */
+  end: string;
+  /** Duração real medida em minutos completos */
+  minutes: number;
+}
+
+/** Estado da avaliação da pausa (regra 45m / 15m+30m) — ver evaluateBreakBlocks em lib/time. */
+export interface BreakStatusInfo {
+  validMinutes: number;
+  remainingMinutes: number;
+  isComplete: boolean;
+  hasContinuous45: boolean;
+  hasFirstBlock: boolean;
+  hasSecondBlock: boolean;
+  activeMinutes: number;
+  activeRemaining: number;
+  label: string;
+}
+
 export interface WorkDay {
   id: string;
   date: string;
@@ -42,8 +64,12 @@ export interface WorkDay {
   timezone?: string | null;
   utcOffset?: string | null;
   breakStart?: string | null;
+  /** @deprecated Campo legado — a regra atual usa blocos medidos (breakBlocks). */
   breakType?: 'continuous' | 'split' | null;
+  /** @deprecated Total bruto legado; usar breakBlocks para a regra 45m/15+30m. */
   breakMinutes?: number;
+  /** Blocos de pausa medidos (persistidos como Json na tabela work_days) */
+  breakBlocks?: BreakBlock[] | unknown;
   events: WorkDayEvent[];
   drivingSessions?: DrivingSession[];
   // Campos calculados devolvidos pela API

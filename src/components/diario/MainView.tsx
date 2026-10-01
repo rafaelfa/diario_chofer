@@ -22,7 +22,7 @@ import { CircularTimeCounter } from '@/components/diario/CircularTimeCounter';
 import { DayTimeline } from '@/components/diario/DayTimeline';
 import { TrafficLightStatus } from '@/components/diario/TrafficLightStatus';
 import { WeeklyBars } from '@/components/diario/WeeklyBars';
-import { BreakTimer } from '@/components/diario/BreakTimer';
+import { BreakStatusCard } from '@/components/diario/BreakStatusCard';
 import { WeeklyRestAlert } from '@/components/diario/WeeklyRestAlert';
 import type {
   ConformityStatus,
@@ -31,8 +31,8 @@ import type {
   EndFormState,
   NewEventState,
   LastKmInfo,
-  BreakState,
 } from '@/hooks/useDiarioActions';
+import type { BreakStatusInfo } from '@/lib/types';
 
 interface MainViewProps {
   currentDay: WorkDay | null;
@@ -70,12 +70,14 @@ interface MainViewProps {
   isStarting?: boolean;
   isEnding?: boolean;
   isDeleting?: boolean;
-  // Break (1 driver)
-  breakState: BreakState;
-  /** Total de minutos de pausa (concluídas + em curso) — v4.1.5 */
+  // Break (1 driver) — botão único, regra 45m / 15m+30m
+  /** Estado avaliado dos blocos de pausa (validados, falta, rótulo) */
+  breakStatus: BreakStatusInfo;
+  /** true quando existe uma pausa em curso */
+  isOnBreak: boolean;
+  /** Total de minutos de pausa VALIDOS (regra 45m/15+30m) */
   breakMinutes: number;
-  onOpenBreak: () => void;
-  onStartBreak: (type: 'continuous' | 'split') => void;
+  onStartBreak: () => void;
   onEndBreak: () => void;
 }
 
@@ -95,9 +97,9 @@ export function MainView({
   onLoadWorkDays,
   isStarting,
   isEnding,
-  breakState,
+  breakStatus,
+  isOnBreak,
   breakMinutes,
-  onOpenBreak,
   onStartBreak,
   onEndBreak,
 }: MainViewProps) {
@@ -106,15 +108,15 @@ export function MainView({
   const startKmInputRef = useRef<HTMLInputElement>(null);
   const breakTimerRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to break timer when it appears on mobile
+  // Scroll to break timer when a break starts on mobile
   useEffect(() => {
-    if (breakState.isActive && currentDay?.numDrivers === 1 && breakTimerRef.current) {
+    if (isOnBreak && currentDay?.numDrivers === 1 && breakTimerRef.current) {
       // Small delay to ensure the element is rendered
       setTimeout(() => {
         breakTimerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 100);
     }
-  }, [breakState.isActive, breakState.type, currentDay?.numDrivers]);
+  }, [isOnBreak, currentDay?.numDrivers]);
 
   const handleMatriculaComplete = useCallback(() => {
     // Focus País de Início if not filled, otherwise focus KM Inicial
@@ -371,14 +373,14 @@ export function MainView({
       ) : !currentDay.endTime ? (
         /* DIA EM ANDAMENTO */
         <>
-        {/* BREAK TIMER — No mobile aparece no TOPO antes de tudo */}
-        {breakState.isActive && currentDay.numDrivers === 1 && (
-          <div className="lg:hidden">
-            <BreakTimer
-              breakStartTime={breakState.startTime}
-              breakType={breakState.type}
-              onBreakTypeSelect={onStartBreak}
-              onResume={onEndBreak}
+        {/* BREAK — No mobile aparece no TOPO antes de tudo (botão único, regra 45m/15+30) */}
+        {currentDay.numDrivers === 1 && (
+          <div className="lg:hidden" ref={breakTimerRef}>
+            <BreakStatusCard
+              status={breakStatus}
+              isOnBreak={isOnBreak}
+              onStartBreak={onStartBreak}
+              onEndBreak={onEndBreak}
             />
           </div>
         )}
@@ -474,14 +476,14 @@ export function MainView({
             </Card>
 
             {/* Pausa / Retomada / Eventos */}
-            {/* No desktop, o BreakTimer aparece aqui (no mobile já está no topo) */}
-            {breakState.isActive && currentDay.numDrivers === 1 ? (
-              <div className="hidden lg:block" ref={breakTimerRef}>
-                <BreakTimer
-                  breakStartTime={breakState.startTime}
-                  breakType={breakState.type}
-                  onBreakTypeSelect={onStartBreak}
-                  onResume={onEndBreak}
+            {/* No desktop, o cartão de pausa aparece aqui (no mobile já está no topo) */}
+            {currentDay.numDrivers === 1 ? (
+              <div className="hidden lg:block">
+                <BreakStatusCard
+                  status={breakStatus}
+                  isOnBreak={isOnBreak}
+                  onStartBreak={onStartBreak}
+                  onEndBreak={onEndBreak}
                 />
               </div>
             ) : currentDay.isPaused && currentDay.numDrivers === 2 ? (
@@ -510,13 +512,8 @@ export function MainView({
             ) : (
               /* PAUSAR + EVENTO buttons for ALL drivers */
               <div className="grid grid-cols-2 gap-3">
-                {currentDay.numDrivers === 2 ? (
+                {currentDay.numDrivers === 2 && (
                   <Button onClick={onOpenPauseDialog} variant="outline" className="h-14 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700 text-base font-medium">
-                    <Pause className="h-5 w-5 mr-2" />
-                    PAUSAR
-                  </Button>
-                ) : (
-                  <Button onClick={onOpenBreak} variant="outline" className="h-14 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700 text-base font-medium">
                     <Pause className="h-5 w-5 mr-2" />
                     PAUSAR
                   </Button>

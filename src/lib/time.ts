@@ -157,6 +157,7 @@ export function getTimeAtUtcOffset(date: Date, utcOffset?: string | null): strin
   return `${String(offsetDate.getUTCHours()).padStart(2, '0')}:${String(offsetDate.getUTCMinutes()).padStart(2, '0')}`;
 }
 
+/** @deprecated Usar getValidBreakMinutes — blocos <15m não contam para a pausa obrigatória. */
 export function getTotalBreakMinutes(
   completedMinutes: number | null | undefined,
   activeBreakStart?: Date | string | null,
@@ -171,14 +172,192 @@ export function getTotalBreakMinutes(
   return completed + activeMinutes;
 }
 
+// ─── Pausas flexíveis — Reg. CE 561/2006, Art. 4º (regra 45m ou 15m + 30m) ───
+
+/** Duração mínima legal de um bloco de pausa fracionado (1ª parte). */
+export const BREAK_BLOCK_MIN_FIRST = 15;
+/** Duração mínima legal do segundo bloco quando o primeiro ainda não fechou os 45m. */
+export const BREAK_BLOCK_MIN_SECOND = 30;
+/** Duração da pausa única completa. */
+export const BREAK_REQUIRED_TOTAL = 45;
+
+/**
+ * Um bloco de pausa registado (duração real medida entre clique em "Pausa" e "Retomar").
+ * `start`/`end` são timestamps ISO para permitir restauro após refresh.
+ */
+export interface BreakBlock {
+  start: string;
+  end: string;
+  minutes: number;
+}
+
+/** Resultado da avaliação dos blocos de pausa face à regra 45m / 15m+30m. */
+export interface BreakStatus {
+  /** Soma dos minutos LEGALMENTE válidos (blocos ≥15m; nunca conta blocos <15m) */
+  validMinutes: number;
+  /** Minutos que faltam para cumprir a pausa obrigatória */
+  remainingMinutes: number;
+  /** true quando a obrigação está cumprida (45m contínuos ou 15m + 30m) */
+  isComplete: boolean;
+  /** true se existe um bloco único com ≥45 minutos */
+  hasContinuous45: boolean;
+  /** true se o bloco de ≥15m (1ª parte) já foi feito */
+  hasFirstBlock: boolean;
+  /** true se o bloco de ≥30m (2ª parte) já foi feito */
+  hasSecondBlock: boolean;
+  /** Bloco em curso (não fechado) — minutos reais até agora */
+  activeMinutes: number;
+  /** Quantos minutos faltam para o bloco em curso fechar (0 se já fechou) */
+  activeRemaining: number;
+  /** Rótulo legível do estado ("45 min contínuos", "Faltam 30 min", ...) */
+  label: string;
+}
+
+/**
+ * Motor de cálculo da regra de pausas flexíveis.
+ *
+ * Regras estritas:
+ *  - Pausa válida = bloco único de ≥45min OU dois blocos: 1º ≥15min + 2º ≥30min.
+ *  - Blocos com menos de 15 minutos NÃO contabilizam para a pausa obrigatória.
+ *  - Exemplo: bloco de 16min → conta como bloco válido de 15m, faltam 30m.
+ *  - Exemplo: bloco de 29min (<45m, ≥15m) → conta só como os 15m, faltam 30m.
+ *  - Exemplo: 15m já feitos + bloco de 27min → os 27m não fecham o 2º bloco
+ *    (precisam de ≥30m), logo continuam a faltar 30m.
+ */
+export function evaluateBreakBlocks(
+  blocks: BreakBlock[] | null | undefined,
+  activeStart?: Date | string | null,
+  now: Date = new Date()
+): BreakStatus {
+  const list = Array.isArray(blocks) ? blocks : [];
+
+  let hasContinuous45 = false;
+  let hasFirstBlock = false;
+  let hasSecondBlock = false;
+
+  for (const block of list) {
+    const minutes = Number(block?.minutes);
+    if (!Number.isFinite(minutes) || minutes < BREAK_BLOCK_MIN_FIRST) continue; // <15m descartado
+    if (minutes >= BREAK_REQUIRED_TOTAL) hasContinuous45 = true;
+    else hasFirstBlock = true;
+  }
+
+  if (!hasContinuous45 && hasFirstBlock) {
+    // O 2º bloco tem de ter ≥30min; blocos de 15–29min repetem apenas a 1ª parte.
+    hasSecondBlock = list.some(block => {
+      const minutes = Number(block?.minutes);
+      return Number.isFinite(minutes) && minutes >= BREAK_REQUIRED_TOTAL - BREAK_BLOCK_MIN_FIRST && minutes < BREAK_REQUIRED_TOTAL;
+    });
+  }
+
+  const isComplete = hasContinuous45 || (hasFirstBlock && hasSecondBlock);
+
+  let validMinutes = 0;
+  if (hasContinuous45) validMinutes = BREAK_REQUIRED_TOTAL;
+  else if (hasFirstBlock) validMinutes = hasSecondBlock ? BREAK_REQUIRED_TOTAL : BREAK_BLOCK_MIN_FIRST;
+
+  const remainingMinutes = isComplete ? 0 : BREAK_REQUIRED_TOTAL - validMinutes;
+
+  // Bloco em curso (pausa iniciada mas ainda não retomada)
+  let activeMinutes = 0;
+  if (activeStart) {
+    const start = activeStart instanceof Date ? activeStart : new Date(activeStart);
+    if (!Number.isNaN(start.getTime())) {
+      activeMinutes = Math.max(0, Math.floor((now.getTime() - start.getTime()) / 60000));
+    }
+  }
+
+  let activeRemaining = 0;
+  if (activeMinutes > 0 && !isComplete) {
+    if (!hasFirstBlock) {
+      // Ainda sem 1ª parte: o bloco em curso fecha aos 15m (ou aos 45m se for contínuo)
+      activeRemaining = Math.max(0, Math.min(BREAK_BLOCK_MIN_FIRST, BREAK_REQUIRED_TOTAL) - activeMinutes);
+    } else {
+      // Com a 1ª parte feita, o bloco em curso só fecha aos 30m (ou 45m se continuar)
+      activeRemaining = Math.max(0, Math.min(BREAK_BLOCK_MIN_SECOND, BREAK_REQUIRED_TOTAL) - activeMinutes);
+    }
+  }
+
+  let label: string;
+  if (isComplete) {
+    label = hasContinuous45 ? 'Pausa de 45 min contínuos cumprida' : 'Pausa 15 min + 30 min cumprida';
+  } else if (hasFirstBlock) {
+    label = `Faltam ${BREAK_BLOCK_MIN_SECOND} minutos de pausa`;
+  } else if (activeMinutes > 0) {
+    label = `Em pausa — faltam ${activeRemaining} min para fechar o bloco de ${BREAK_BLOCK_MIN_FIRST} min`;
+  } else {
+    label = `Faltam ${BREAK_REQUIRED_TOTAL} minutos de pausa`;
+  }
+
+  return {
+    validMinutes,
+    remainingMinutes,
+    isComplete,
+    hasContinuous45,
+    hasFirstBlock,
+    hasSecondBlock,
+    activeMinutes,
+    activeRemaining,
+    label,
+  };
+}
+
+/**
+ * Total de minutos de pausa VALIDOS (regra 45m / 15m+30m) a subtrair do tempo de condução.
+ * Inclui o progresso do bloco em curso quando este já atinge os mínimos legais.
+ */
+export function getValidBreakMinutes(
+  blocks: BreakBlock[] | null | undefined,
+  activeStart?: Date | string | null,
+  now: Date = new Date()
+): number {
+  const status = evaluateBreakBlocks(blocks, activeStart, now);
+  let total = status.validMinutes;
+
+  const list = Array.isArray(blocks) ? blocks : [];
+  const hasOpenBlock = list.some(block => typeof block?.end !== 'string' || !block.end);
+
+  if (status.activeMinutes > 0 && !status.isComplete && !hasOpenBlock) {
+    if (!status.hasFirstBlock && status.activeMinutes >= BREAK_BLOCK_MIN_FIRST) {
+      total += Math.min(status.activeMinutes, BREAK_REQUIRED_TOTAL);
+    } else if (status.hasFirstBlock && status.activeMinutes >= BREAK_BLOCK_MIN_SECOND) {
+      total += Math.min(status.activeMinutes, BREAK_REQUIRED_TOTAL);
+    }
+  }
+
+  return total;
+}
+
+/** Converte um valor qualquer (JSON de API) num array de blocos válido. */
+export function normalizeBreakBlocks(value: unknown): BreakBlock[] {
+  if (!Array.isArray(value)) return [];
+  const result: BreakBlock[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const { start, end, minutes } = item as Record<string, unknown>;
+    if (typeof start !== 'string' || typeof minutes !== 'number' || !Number.isFinite(minutes)) continue;
+    result.push({ start, end: typeof end === 'string' ? end : '', minutes });
+  }
+  return result;
+}
+
+/** Constrói um bloco a partir do início/fim reais da pausa (duração em minutos completos). */
+export function buildBreakBlock(start: Date, end: Date = new Date()): BreakBlock {
+  const minutes = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000));
+  return { start: start.toISOString(), end: end.toISOString(), minutes };
+}
+
 export function calcWorkDayHours(
   workDay: {
     startTime?: string | null;
     endTime?: string | null;
     utcOffset?: string | null;
     primaryDriverNumber?: number | null;
+    /** @deprecated Campo legado — usado apenas como fallback se não existirem breakBlocks */
     breakMinutes?: number | null;
     breakStart?: Date | string | null;
+    /** Blocos de pausa medidos (regra 45m / 15m+30m). Fonte primária de cálculo. */
+    breakBlocks?: BreakBlock[] | unknown;
     drivingSessions?: Array<{
       startTime?: string | null;
       endTime?: string | null;
@@ -195,8 +374,13 @@ export function calcWorkDayHours(
   );
   const activeSession = sessions.find(session => session.status === 'active' && !session.endTime);
 
+  const blocks = normalizeBreakBlocks(workDay.breakBlocks);
+  const breakMinutes = blocks.length > 0
+    ? getValidBreakMinutes(blocks, workDay.breakStart, now)
+    : getTotalBreakMinutes(workDay.breakMinutes, workDay.breakStart, now);
+
   return calcHoursWorked(sessions, workDay.startTime, workDay.endTime, {
     currentTime: getTimeAtUtcOffset(now, activeSession?.utcOffset ?? workDay.utcOffset),
-    breakMinutes: getTotalBreakMinutes(workDay.breakMinutes, workDay.breakStart, now),
+    breakMinutes,
   });
 }

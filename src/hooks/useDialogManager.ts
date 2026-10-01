@@ -38,12 +38,13 @@ export function useDialogManager() {
   const [pauseKm, setPauseKm] = useState('');
   const [isProcessingPause, setIsProcessingPause] = useState(false);
 
-  // Break (1 driver)
+  // Break (1 driver) — botão único, regra 45m / 15m+30m
   const [breakState, setBreakState] = useState<BreakState>({
     isActive: false,
     startTime: null,
     type: 'none',
     completedBreakMinutes: 0,
+    blocks: [],
   });
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning') => {

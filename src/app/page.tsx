@@ -46,13 +46,13 @@ export default function DiarioMotorista() {
     viewingDay, setViewingDay, editingDay, setEditingDay,
     editForm, setEditForm, deleteConfirm, setDeleteConfirm,
     showPauseDialog, setShowPauseDialog, pauseKm, setPauseKm, isProcessingPause,
-    breakState,
+    breakStatus,
     breakMinutes,
     conformity, workingTime,
     isStarting, isEnding,
     handleStartDay, handleEndDay, handleAddEvent,
     handlePauseDriving, handleResumeDriving, handleOpenPauseDialog, handleConfirmResume,
-    handleStartBreak, handleEndBreak,
+    handleEndBreak,
     handleOpenBreak,
     handleViewDay, handleEditClick, handleSaveEdit, handleDeleteDay,
     handleGeneratePdf, handleLogout,
@@ -123,10 +123,10 @@ export default function DiarioMotorista() {
             onLoadWorkDays={loadWorkDays}
             isStarting={isStarting}
             isEnding={isEnding}
-            breakState={breakState}
+            breakStatus={breakStatus}
+            isOnBreak={breakStatus.activeMinutes > 0 || breakState?.isActive === true}
             breakMinutes={breakMinutes}
-            onOpenBreak={handleOpenBreak}
-            onStartBreak={handleStartBreak}
+            onStartBreak={handleOpenBreak}
             onEndBreak={handleEndBreak}
             workDays={workDays}
           />

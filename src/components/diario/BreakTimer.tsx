@@ -3,7 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Clock, Coffee, Play, CheckCircle2, Timer, AlertTriangle } from 'lucide-react';
+import { Coffee, Play, CheckCircle2, AlertTriangle } from 'lucide-react';
+import {
+  BREAK_CONTINUOUS_MIN,
+  BREAK_SPLIT_1_MIN,
+  breakRemainingMinutes,
+  computeBreakPlan,
+} from '@/lib/breakBlocks';
 
 export type BreakType = 'none' | 'continuous' | 'split';
 
@@ -13,15 +19,42 @@ interface BreakTimerProps {
   breakType: BreakType;
   onBreakTypeSelect: (type: 'continuous' | 'split') => void;
   onResume: () => void;
+  /** Minutos de pausas já concluídas e válidas no dia (blocos ≥15min) */
+  completedBreakMinutes?: number;
 }
 
-const CONTINUOUS_SECONDS = 45 * 60; // 45 minutos
-const SPLIT_PHASE1_SECONDS = 15 * 60; // 1ª pausa: 15 minutos
+const CONTINUOUS_SECONDS = BREAK_CONTINUOUS_MIN * 60; // 45 minutos
+const SPLIT_PHASE1_SECONDS = BREAK_SPLIT_1_MIN * 60; // 1ª pausa: 15 minutos
 const SPLIT_PHASE2_SECONDS = 30 * 60; // 2ª pausa: 30 minutos
 
-export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onResume }: BreakTimerProps) {
+/** Formatar MM:SS */
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+/** Rótulo humano para um número de minutos em falta */
+function minutesLabel(min: number): string {
+  if (min <= 0) return '';
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h > 0 && m > 0) return `${h}h${m.toString().padStart(2, '0')}`;
+  if (h > 0) return `${h}h`;
+  return `${m} min`;
+}
+
+export function BreakTimer({
+  breakStartTime,
+  breakType,
+  onBreakTypeSelect,
+  onResume,
+  completedBreakMinutes = 0,
+}: BreakTimerProps) {
   const [remaining, setRemaining] = useState(0);
   const [phase, setPhase] = useState<1 | 2>(1);
+  // Minutos decorridos da pausa em curso (atualizado a cada segundo pelo cronómetro)
+  const [elapsedBreakSec, setElapsedBreakSec] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resumedEarlyRef = useRef(false);
 
@@ -35,7 +68,7 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
     return ph === 1 ? SPLIT_PHASE1_SECONDS : SPLIT_PHASE2_SECONDS;
   }, []);
 
-  // Cronômetro principal
+  // Cronómetro principal
   useEffect(() => {
     if (!breakStartTime) {
       return;
@@ -46,11 +79,11 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
 
       const now = Date.now();
       const elapsed = Math.floor((now - breakStartTime.getTime()) / 1000);
+      setElapsedBreakSec(elapsed);
       let target = getTargetSeconds(breakType, phase);
 
       if (breakType === 'split') {
         if (phase === 1 && elapsed >= SPLIT_PHASE1_SECONDS) {
-          // Mudar para fase 2
           setPhase(2);
           target = SPLIT_PHASE2_SECONDS;
           const phase2Elapsed = elapsed - SPLIT_PHASE1_SECONDS;
@@ -74,12 +107,14 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
     };
   }, [breakStartTime, breakType, phase, getTargetSeconds]);
 
-  // Formatar MM:SS
-  const formatTime = (seconds: number): string => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
+  // ─── Lógica dinâmica do botão único ────────────────────────────────────────
+  // Tempo total ainda em falta para cumprir a obrigação dos 45 min
+  // (blocos válidos já concluídos + pausa em curso, via estado do cronómetro).
+  const inProgressMin = Math.floor(elapsedBreakSec / 60);
+  const totalValidMinutes = completedBreakMinutes + inProgressMin;
+  const missingMin = breakRemainingMinutes(totalValidMinutes);
+  const plan = computeBreakPlan(completedBreakMinutes);
+  const obligationMet = missingMin <= 0;
 
   const isComplete = remaining <= 0 && breakStartTime !== null;
   const phaseTotal = getPhaseTotal(breakType, phase);
@@ -101,8 +136,19 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
     onResume();
   };
 
-  // Se ainda não escolheu o tipo de pausa, mostrar seleção
+  // Botão único inteligente: inicia diretamente com o plano recomendado
+  // (contínua se não há blocos válidos; divisão 15+30 se já existe 1º bloco).
+  const handleSmartStart = () => {
+    onBreakTypeSelect(plan.strategy === 'split-15-30' ? 'split' : 'continuous');
+  };
+
+  // Se ainda não escolheu o tipo de pausa → MOSTRAR BOTÃO ÚNICO DINÂMICO
   if (breakType === 'none') {
+    const startLabel =
+      missingMin < BREAK_CONTINUOUS_MIN
+        ? `Continuar Pausa — faltam ${minutesLabel(missingMin)}`
+        : 'Iniciar Pausa';
+
     return (
       <Card className="border-2 border-blue-300 dark:border-blue-700 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950 dark:to-slate-900 shadow-lg ring-2 ring-blue-400/50">
         <div className="p-4 sm:p-6 text-center space-y-3 sm:space-y-4">
@@ -113,23 +159,45 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
           <p className="text-xs text-muted-foreground">
             Reg. CE 561/2006 — Pausa mínima de 45 minutos após 4,5h de condução
           </p>
-          <div className="space-y-3 pt-1 sm:pt-2">
+
+          {/* Estado atual calculado dinamicamente */}
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50 p-3 space-y-1">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {obligationMet ? (
+                <>Obrigação de pausa <span className="text-emerald-600 dark:text-emerald-400 font-bold">cumprida</span> ({minutesLabel(totalValidMinutes)} em pausa)</>
+              ) : completedBreakMinutes > 0 ? (
+                <>Já cumpriu <b>{minutesLabel(completedBreakMinutes)}</b> de pausa válida · faltam <b className="text-amber-600 dark:text-amber-400">{minutesLabel(missingMin)}</b></>
+              ) : (
+                <>Faltam <b className="text-amber-600 dark:text-amber-400">45 min</b> de pausa obrigatória</>
+              )}
+            </p>
+            {!obligationMet && (
+              <p className="text-[10px] sm:text-xs text-muted-foreground">
+                Plano automático: {plan.strategy === 'split-15-30'
+                  ? `bloco de ${minutesLabel(plan.stepMinutes)} (divisão 15 min + 30 min)`
+                  : '45 min contínuos (ou dividir 15 min + 30 min)'}
+                {' '}· blocos com menos de 15 min são descartados
+              </p>
+            )}
+          </div>
+
+          {obligationMet ? (
             <Button
-              onClick={() => onBreakTypeSelect('continuous')}
+              onClick={onResume}
+              className="w-full h-12 sm:h-14 bg-emerald-600 hover:bg-emerald-700 text-base font-bold"
+            >
+              <Play className="h-5 w-5 mr-2" />
+              RETOMAR CONDUÇÃO
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSmartStart}
               className="w-full h-12 sm:h-14 bg-blue-600 hover:bg-blue-700 text-base font-bold"
             >
-              <Clock className="h-5 w-5 mr-2" />
-              45 min Contínua
+              <Coffee className="h-5 w-5 mr-2" />
+              {startLabel}
             </Button>
-            <Button
-              onClick={() => onBreakTypeSelect('split')}
-              variant="outline"
-              className="w-full h-12 sm:h-14 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700 text-base font-bold"
-            >
-              <Timer className="h-5 w-5 mr-2" />
-              Dividir: 15min + 30min
-            </Button>
-          </div>
+          )}
         </div>
       </Card>
     );
@@ -158,7 +226,7 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
             <span className={`text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 rounded-full ${
               phase === 1
                 ? (remaining > 0 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 line-through')
-                : (remaining > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 line-through')
+                : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 line-through'
             }`}>
               1ª Pausa: 15min
             </span>
@@ -181,11 +249,16 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
           </p>
         )}
 
-        {/* Cronômetro */}
+        {/* Cronómetro + tempo total em falta */}
         <div className="py-2 sm:py-3">
           <p className={`text-5xl sm:text-6xl font-bold font-mono ${isComplete ? 'text-emerald-600 dark:text-emerald-400' : colors.text}`}>
             {isComplete ? '00:00' : formatTime(remaining)}
           </p>
+          {!isComplete && missingMin > 0 && (
+            <p className="mt-1 text-[10px] sm:text-xs text-muted-foreground">
+              Em falta para os 45 min obrigatórios: <b>{minutesLabel(missingMin)}</b>
+            </p>
+          )}
         </div>
 
         {/* Barra de progresso */}

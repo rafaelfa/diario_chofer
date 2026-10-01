@@ -16,6 +16,7 @@
 
 import { useState, useCallback } from 'react';
 import type { WorkDay } from '@/lib/types';
+import type { BreakBlock } from '@/lib/time';
 import { getLocalTimeString, getUtcOffsetString } from '@/lib/timezone';
 
 interface StartDayPayload {
@@ -41,6 +42,7 @@ interface EndDayPayload {
   breakStart?: string | null;
   breakType?: string | null;
   breakMinutes?: number;
+  breakBlocks?: BreakBlock[];
 }
 
 interface EditDayPayload {
@@ -179,7 +181,7 @@ export function useWorkDays() {
 
   /** Persiste o estado da pausa no banco (fire-and-forget com retry único) */
   const saveBreakState = useCallback(
-    async (dayId: string, payload: { breakStart: string | null; breakType: string | null; breakMinutes: number }): Promise<void> => {
+    async (dayId: string, payload: { breakStart: string | null; breakType: string | null; breakMinutes: number; breakBlocks?: BreakBlock[] }): Promise<void> => {
       const send = () => fetch(`/api/workdays/${dayId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },

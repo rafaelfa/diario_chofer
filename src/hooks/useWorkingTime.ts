@@ -13,7 +13,12 @@
 
 import { useCallback } from 'react';
 import type { WorkDay } from '@/lib/types';
-import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
+import {
+  calcDrivingMinutes,
+  getValidBreakMinutes,
+  minutesToFormatted,
+  normalizeBreakBlocks,
+} from '@/lib/time';
 import { formatDatePt, getLocalTimeString } from '@/lib/timezone';
 import type { ConformityStatus, WorkingTimeResult, BreakState } from './useDiarioActions';
 
@@ -25,21 +30,28 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
   };
 
   /**
-   * Calcula o total de minutos de pausa que devem ser subtraídos.
-   * Inclui:
-   *   - Pausas já concluídas (completedBreakMinutes)
-   *   - Pausa activa em curso (se houver)
+   * Total de minutos de pausa VÁLIDOS a subtrair do tempo de condução
+   * (regra 45m ou 15m + 30m — Reg. CE 561/2006, Art. 4º):
+   *   - Blocos com menos de 15 minutos NÃO contabilizam.
+   *   - Bloco em curso só conta quando atinge os mínimos legais (15/30/45).
+   *   - Fallback para dias antigos sem breakBlocks: total bruto legado.
    */
   const getBreakMinutes = useCallback((): number => {
-    let total = breakState?.completedBreakMinutes ?? currentDay?.breakMinutes ?? 0;
+    const blocks = breakState?.blocks ?? normalizeBreakBlocks(currentDay?.breakBlocks);
 
+    if (blocks.length > 0) {
+      const activeStart = breakState?.isActive ? breakState.startTime : currentDay?.breakStart;
+      return getValidBreakMinutes(blocks, activeStart, now ?? new Date());
+    }
+
+    // Dias legados (sem blocos): usar acumulado antigo + pausa em curso
+    let total = breakState?.completedBreakMinutes ?? currentDay?.breakMinutes ?? 0;
     if (breakState?.isActive && breakState.startTime && now) {
       const elapsed = Math.floor((now.getTime() - breakState.startTime.getTime()) / 60000);
       total += Math.max(elapsed, 0);
     }
-
     return Math.max(total, 0);
-  }, [breakState, currentDay?.breakMinutes, now]);
+  }, [breakState, currentDay?.breakMinutes, currentDay?.breakBlocks, currentDay?.breakStart, now]);
 
   const calculateWorkingTime = useCallback((): WorkingTimeResult => {
     if (!currentDay?.startTime) return { hours: 0, minutes: 0, formatted: '0:00', totalMinutes: 0 };

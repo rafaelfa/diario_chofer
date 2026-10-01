@@ -52,8 +52,9 @@ model WorkDay {
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
   breakStart    DateTime?        @map("break_start") // Início da pausa em curso (persistida — sobrevive a refresh)
-  breakType     String?          @map("break_type") // 'continuous' | 'split' | null
-  breakMinutes  Int              @default(0) @map("break_minutes") // Total de minutos de pausas concluídas no dia
+  breakType     String?          @map("break_type") // 'continuous' | 'split' | null (legado — regra atual usa blocos medidos)
+  breakMinutes  Int              @default(0) @map("break_minutes") // Total de minutos de pausas concluídas no dia (bruto, legado)
+  breakBlocks   Json?            @map("break_blocks") // Blocos de pausa medidos [{start,end,minutes}] — regra 45m / 15m+30m
 
   // Relacionamentos
   user             AppUser          @relation(fields: [userId], references: [id], onDelete: Cascade)

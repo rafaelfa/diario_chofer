@@ -164,6 +164,23 @@ export async function PUT(
       if (!parsedBreakMinutes.valid) return NextResponse.json({ error: 'Minutos de pausa inválidos' }, { status: 400 });
       dataToUpdate.breakMinutes = parsedBreakMinutes.value ?? 0;
     }
+    if (body.breakBlocks !== undefined) {
+      if (body.breakBlocks === null) {
+        dataToUpdate.breakBlocks = Prisma.DbNull;
+      } else if (Array.isArray(body.breakBlocks)) {
+        // Valida a estrutura dos blocos: [{ start: ISO, end: ISO|'', minutes: >=0 }]
+        const valid = body.breakBlocks.every(block =>
+          block && typeof block === 'object' &&
+          typeof block.start === 'string' && !Number.isNaN(Date.parse(block.start)) &&
+          (typeof block.end !== 'string' || block.end === '' || !Number.isNaN(Date.parse(block.end))) &&
+          typeof block.minutes === 'number' && Number.isFinite(block.minutes) && block.minutes >= 0 && block.minutes <= 24 * 60
+        );
+        if (!valid) return NextResponse.json({ error: 'Blocos de pausa inválidos' }, { status: 400 });
+        dataToUpdate.breakBlocks = body.breakBlocks;
+      } else {
+        return NextResponse.json({ error: 'breakBlocks deve ser um array de blocos' }, { status: 400 });
+      }
+    }
 
     log('Dados a atualizar:', JSON.stringify(dataToUpdate, null, 2));
 

@@ -258,9 +258,11 @@ export function ViewDayDialog({ day, onClose, onEdit }: ViewDayDialogProps) {
                         {end ? end.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }) : 'em andamento'}
                         {' · Motorista '}{activity.driverNumber}
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Odómetro: {activity.startKm ?? '--'} → {activity.endKm ?? '--'} km
-                      </p>
+                      {(activity.startKm != null || activity.endKm != null) && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Odómetro: {activity.startKm ?? '--'} → {activity.endKm ?? '--'} km
+                        </p>
+                      )}
                     </div>
                   );
                 })}

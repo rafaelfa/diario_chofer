@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
     }
 
     const parsedStartKm = parseNonNegativeInteger(startKm);
-    if (!parsedStartKm.valid) {
+    if (!parsedStartKm.valid || parsedStartKm.value === null) {
       return NextResponse.json({ error: 'KM inicial deve ser um inteiro não negativo' }, { status: 400 });
     }
     const kmValue = parsedStartKm.value;
@@ -189,7 +189,7 @@ export async function POST(request: NextRequest) {
                     driverNumber,
                     type: initialActivityType,
                     startedAt: activityStartedAt,
-                    startKm: kmValue,
+                    startKm: null,
                   },
                 },
               }),

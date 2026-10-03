@@ -4,7 +4,6 @@ import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { calcKmTraveled, calcWorkDayHours, getTimeAtUtcOffset } from '@/lib/time';
 import { logError } from '@/lib/logger';
-import { parseNonNegativeInteger } from '@/lib/validators';
 import type { WorkActivityType } from '@/lib/types';
 
 const ACTIVITY_TYPES = new Set<WorkActivityType>(['loading', 'unloading', 'refueling', 'other']);
@@ -39,12 +38,6 @@ export async function POST(
       return NextResponse.json({ error: 'Fuso horário inválido' }, { status: 400 });
     }
 
-    const parsedKm = parseNonNegativeInteger(body.currentKm);
-    if (!parsedKm.valid || parsedKm.value === null) {
-      return NextResponse.json({ error: 'KM atual deve ser um inteiro não negativo' }, { status: 400 });
-    }
-    const currentKm = parsedKm.value;
-
     const currentAtDate = new Date(currentAt);
     const currentTime = getTimeAtUtcOffset(currentAtDate, utcOffset);
 
@@ -70,13 +63,9 @@ export async function POST(
         if (activeActivity) throw new ActivityRequestError('Já existe uma atividade sem condução em andamento', 409);
 
         if (activeSession) {
-          if (activeSession.startKm != null && currentKm < activeSession.startKm) {
-            throw new ActivityRequestError('KM atual não pode ser menor que o KM inicial da sessão', 400);
-          }
-
           const changedSession = await transaction.drivingSession.updateMany({
             where: { id: activeSession.id, workDayId, userId, status: 'active', endTime: null },
-            data: { endTime: currentTime, endKm: currentKm, status: 'paused' },
+            data: { endTime: currentTime, endKm: null, status: 'paused' },
           });
           if (changedSession.count !== 1) throw new ActivityRequestError('A sessão mudou. Atualize os dados.', 409);
         } else if (workDay.drivingSessions.length > 0) {
@@ -92,19 +81,16 @@ export async function POST(
             driverNumber: activeSession?.driverNumber ?? workDay.primaryDriverNumber ?? 1,
             type: type as WorkActivityType,
             startedAt: currentAtDate,
-            startKm: currentKm,
+            startKm: null,
           },
         });
       } else {
         if (activeSession) throw new ActivityRequestError('Uma sessão de condução já está ativa', 409);
         if (!activeActivity) throw new ActivityRequestError('Não há atividade sem condução em andamento', 409);
-        if (activeActivity.startKm != null && currentKm < activeActivity.startKm) {
-          throw new ActivityRequestError('KM atual não pode ser menor que o KM inicial da atividade', 400);
-        }
 
         const changedActivity = await transaction.workActivity.updateMany({
           where: { id: activeActivity.id, workDayId, userId, endedAt: null },
-          data: { endedAt: currentAtDate, endKm: currentKm },
+          data: { endedAt: currentAtDate, endKm: null },
         });
         if (changedActivity.count !== 1) throw new ActivityRequestError('A atividade mudou. Atualize os dados.', 409);
 
@@ -114,7 +100,7 @@ export async function POST(
             userId,
             driverNumber: activeActivity.driverNumber,
             startTime: currentTime,
-            startKm: currentKm,
+            startKm: null,
             status: 'active',
             utcOffset,
           },

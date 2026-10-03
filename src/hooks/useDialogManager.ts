@@ -35,7 +35,6 @@ export function useDialogManager() {
 
   // Pause/Resume
   const [showPauseDialog, setShowPauseDialog] = useState(false);
-  const [pauseKm, setPauseKm] = useState('');
   const [isProcessingPause, setIsProcessingPause] = useState(false);
 
   // Break (1 driver)
@@ -75,8 +74,6 @@ export function useDialogManager() {
     // Pause/Resume
     showPauseDialog,
     setShowPauseDialog,
-    pauseKm,
-    setPauseKm,
     isProcessingPause,
     setIsProcessingPause,
 

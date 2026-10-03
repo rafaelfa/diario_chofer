@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { requireAuth } from '@/lib/auth';
 import { calcKmTraveled } from '@/lib/time';
 import { logError } from '@/lib/logger';
-import { isValidTimeString, parseNonNegativeInteger } from '@/lib/validators';
+import { isValidTimeString } from '@/lib/validators';
 
 // GET - Buscar sessões de um dia de trabalho DO USUÁRIO LOGADO
 export async function GET(request: NextRequest) {
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     const { userId } = await requireAuth();
 
     const body = await request.json();
-    const { workDayId, action, currentKm, currentTime: clientTime, utcOffset: clientOffset } = body;
+    const { workDayId, action, currentTime: clientTime, utcOffset: clientOffset } = body;
 
     if (typeof workDayId !== 'string' || !['pause', 'resume'].includes(action)) {
       return NextResponse.json({ error: 'workDayId e action são obrigatórios' }, { status: 400 });
@@ -74,11 +74,6 @@ export async function POST(request: NextRequest) {
     if (clientOffset !== null && clientOffset !== undefined && !/^[+-](?:0\d|1[0-4]):[0-5]\d$/.test(clientOffset)) {
       return NextResponse.json({ error: 'utcOffset inválido' }, { status: 400 });
     }
-    const parsedKm = parseNonNegativeInteger(currentKm);
-    if (!parsedKm.valid || parsedKm.value === null) {
-      return NextResponse.json({ error: 'KM atual deve ser um inteiro não negativo' }, { status: 400 });
-    }
-
     const workDay = await db.workDay.findFirst({
       where: { id: workDayId, userId },
       include: {
@@ -101,14 +96,11 @@ export async function POST(request: NextRequest) {
       if (workDay.isPaused) return NextResponse.json({ error: 'A jornada já está pausada' }, { status: 409 });
       const activeSession = workDay.drivingSessions.find(session => session.status === 'active' && !session.endTime);
       if (!activeSession) return NextResponse.json({ error: 'Nenhuma sessão ativa para pausar' }, { status: 409 });
-      if (activeSession.startKm != null && parsedKm.value < activeSession.startKm) {
-        return NextResponse.json({ error: 'KM atual não pode ser menor que o KM inicial da sessão' }, { status: 400 });
-      }
 
       const updatedWorkDay = await db.$transaction(async transaction => {
         const changedSession = await transaction.drivingSession.updateMany({
           where: { id: activeSession.id, userId, workDayId, status: 'active', endTime: null },
-          data: { endTime: currentTime, endKm: parsedKm.value, status: 'paused' },
+          data: { endTime: currentTime, endKm: null, status: 'paused' },
         });
         const changedDay = await transaction.workDay.updateMany({
           where: { id: workDayId, userId, isPaused: false, endTime: null },
@@ -139,16 +131,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Já existe uma sessão ativa' }, { status: 409 });
       }
       const prevLastSession = workDay.drivingSessions[workDay.drivingSessions.length - 1];
-      const previousKm = prevLastSession?.endKm ?? workDay.startKm;
       const driverNumber = workDay.numDrivers === 2
         ? (prevLastSession?.driverNumber === workDay.primaryDriverNumber
           ? (workDay.primaryDriverNumber === 1 ? 2 : 1)
           : workDay.primaryDriverNumber)
         : 1;
-      if (previousKm != null && parsedKm.value < previousKm) {
-        return NextResponse.json({ error: 'KM atual não pode ser menor que o último KM registrado' }, { status: 400 });
-      }
-
       const updatedWorkDay = await db.$transaction(async transaction => {
         const changedDay = await transaction.workDay.updateMany({
           where: { id: workDayId, userId, isPaused: true, endTime: null },
@@ -160,7 +147,7 @@ export async function POST(request: NextRequest) {
             workDayId,
             userId,
             startTime: currentTime,
-            startKm: parsedKm.value,
+            startKm: null,
             status: 'active',
             driverNumber,
             utcOffset: sessionOffset,

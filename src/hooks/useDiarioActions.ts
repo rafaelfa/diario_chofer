@@ -133,7 +133,6 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     editForm, setEditForm,
     deleteConfirm, setDeleteConfirm,
     showPauseDialog, setShowPauseDialog,
-    pauseKm, setPauseKm,
     isProcessingPause,
     setIsProcessingPause,
     breakState,
@@ -175,7 +174,6 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   const [isDeleting, setIsDeleting] = useState(false);
   const [showActivityDialog, setShowActivityDialog] = useState(false);
   const [activityType, setActivityType] = useState<WorkActivityType>('loading');
-  const [activityKm, setActivityKm] = useState('');
   const [isProcessingActivity, setIsProcessingActivity] = useState(false);
 
   const { country: gpsCountry, loading: loadingGps, error: gpsError, getLocation } = useGeolocation();
@@ -233,15 +231,13 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gpsCountry, loadingGps]);
 
-  // Detectar país automaticamente quando abrir o formulário de fim de dia
-  // E pré-preencher o KM final com o último KM registrado
+  // Detectar país automaticamente quando abrir o formulário de fim de dia.
   useEffect(() => {
+    if (showEndForm) {
+      setEndForm(prev => ({ ...prev, endKm: '' }));
+    }
     if (showEndForm && !endForm.endCountry) {
       getLocation();
-    }
-    if (showEndForm && currentDay) {
-      const lastKm = currentDay.lastSessionKm ?? currentDay.startKm ?? 0;
-      setEndForm(prev => ({ ...prev, endKm: lastKm ? lastKm.toString() : '' }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showEndForm]);
@@ -371,6 +367,11 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       showToast('Check do Caminhão é obrigatório', 'error');
       return;
     }
+    const initialKm = Number(startForm.startKm);
+    if (!startForm.startKm || !Number.isSafeInteger(initialKm) || initialKm < 0) {
+      showToast('KM inicial deve ser um inteiro não negativo', 'error');
+      return;
+    }
 
     setIsStarting(true);
     try {
@@ -386,7 +387,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         date,
         startTime: getLocalTimeString(now),
         startCountry: startForm.startCountry,
-        startKm: startForm.startKm ? String(parseInt(startForm.startKm)) : '',
+        startKm: String(initialKm),
         lastRest: startForm.lastRest,
         truckCheck: startForm.truckCheck,
         matricula: startForm.matricula.toUpperCase(),
@@ -437,14 +438,15 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       showToast('País de Fim é obrigatório', 'error');
       return;
     }
+    const endKm = Number(endForm.endKm);
+    if (!endForm.endKm || !Number.isSafeInteger(endKm) || endKm < 0) {
+      showToast('KM final deve ser um inteiro não negativo', 'error');
+      return;
+    }
 
-    const previousKm = currentDay.lastSessionKm ?? currentDay.startKm;
-    if (endForm.endKm && previousKm != null) {
-      const endKm = Number(endForm.endKm);
-      if (!Number.isSafeInteger(endKm) || endKm < previousKm) {
-        showToast('KM final deve ser um inteiro e não pode ser menor que o último KM registrado', 'error');
-        return;
-      }
+    if (currentDay.startKm != null && endKm < currentDay.startKm) {
+      showToast('KM final não pode ser menor que o KM inicial da jornada', 'error');
+      return;
     }
 
     const now = new Date();
@@ -487,7 +489,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       await endDay(currentDay.id, {
         endTime: getLocalTimeString(now),
         endCountry: endForm.endCountry,
-        endKm: endForm.endKm ? String(parseInt(endForm.endKm)) : '',
+        endKm: String(Number(endForm.endKm)),
         amplitude: '',
         observations: endForm.observations,
         breakStart: null,
@@ -541,26 +543,16 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
   const handleOpenPauseDialog = () => {
     if (!currentDay) return;
-    const lastKm = currentDay.lastSessionKm ?? currentDay.startKm ?? 0;
-    setPauseKm(lastKm ? lastKm.toString() : '');
     setShowPauseDialog(true);
   };
 
   const handlePauseDriving = async () => {
     if (!currentDay) return;
 
-    const kmValue = pauseKm ? Number(pauseKm) : null;
-
-    if (kmValue === null || !Number.isSafeInteger(kmValue) || kmValue < 0) {
-      showToast('Por favor, informe o KM atual', 'warning');
-      return;
-    }
-
     setIsProcessingPause(true);
     try {
-      await pauseDriving(currentDay.id, pauseKm);
+      await pauseDriving(currentDay.id);
       setShowPauseDialog(false);
-      setPauseKm('');
       showToast('Condução pausada - outro motorista pode assumer', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Erro de conexão', 'error');
@@ -571,26 +563,16 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
   const handleResumeDriving = () => {
     if (!currentDay) return;
-    const lastKm = currentDay.lastSessionKm ?? currentDay.startKm ?? 0;
-    setPauseKm(lastKm ? lastKm.toString() : '');
     setShowPauseDialog(true);
   };
 
   const handleConfirmResume = async () => {
     if (!currentDay) return;
 
-    const kmValue = pauseKm ? Number(pauseKm) : null;
-
-    if (kmValue === null || !Number.isSafeInteger(kmValue) || kmValue < 0) {
-      showToast('Por favor, informe o KM atual do veículo', 'warning');
-      return;
-    }
-
     setIsProcessingPause(true);
     try {
-      await resumeDriving(currentDay.id, pauseKm);
+      await resumeDriving(currentDay.id);
       setShowPauseDialog(false);
-      setPauseKm('');
       showToast('Condução retomada!', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Erro de conexão', 'error');
@@ -601,24 +583,11 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
   const handleOpenNonDrivingActivity = () => {
     if (!currentDay) return;
-    const defaultKm = currentDay.activeWorkActivity?.startKm ?? currentDay.lastSessionKm ?? currentDay.startKm ?? 0;
-    setActivityKm(String(defaultKm));
     setShowActivityDialog(true);
   };
 
   const handleConfirmNonDrivingActivity = async () => {
     if (!currentDay) return;
-    const km = Number(activityKm);
-    if (!Number.isSafeInteger(km) || km < 0) {
-      showToast('Informe um odómetro inteiro não negativo', 'warning');
-      return;
-    }
-
-    const previousKm = currentDay.activeWorkActivity?.startKm ?? currentDay.lastSessionKm ?? currentDay.startKm;
-    if (previousKm != null && km < previousKm) {
-      showToast('O KM atual não pode ser menor que o último KM registrado', 'error');
-      return;
-    }
 
     const isFinishingActivity = !!currentDay.activeWorkActivity;
     setIsProcessingActivity(true);
@@ -626,7 +595,6 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       await changeNonDrivingActivity(
         currentDay.id,
         isFinishingActivity ? 'finish' : 'start',
-        activityKm,
         isFinishingActivity ? undefined : activityType,
       );
       setShowActivityDialog(false);
@@ -951,15 +919,11 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     // --- Pause/Resume ---
     showPauseDialog,
     setShowPauseDialog,
-    pauseKm,
-    setPauseKm,
     isProcessingPause,
     showActivityDialog,
     setShowActivityDialog,
     activityType,
     setActivityType,
-    activityKm,
-    setActivityKm,
     isProcessingActivity,
 
     // --- Break (1 driver) ---

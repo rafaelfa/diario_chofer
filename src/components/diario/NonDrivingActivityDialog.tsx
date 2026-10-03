@@ -2,7 +2,6 @@
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { BriefcaseBusiness, PackageOpen, RefreshCw } from 'lucide-react';
 import type { WorkActivityType } from '@/lib/types';
@@ -19,8 +18,6 @@ interface NonDrivingActivityDialogProps {
   mode: 'start' | 'finish';
   activityType: WorkActivityType;
   onActivityTypeChange: (type: WorkActivityType) => void;
-  currentKm: string;
-  onKmChange: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
   isProcessing: boolean;
@@ -31,8 +28,6 @@ export function NonDrivingActivityDialog({
   mode,
   activityType,
   onActivityTypeChange,
-  currentKm,
-  onKmChange,
   onClose,
   onConfirm,
   isProcessing,
@@ -50,7 +45,7 @@ export function NonDrivingActivityDialog({
           <DialogDescription>
             {isStarting
               ? 'A condução ficará pausada durante o trabalho. A amplitude da jornada continua contando.'
-              : `Atividade: ${ACTIVITY_LABELS[activityType]}. Informe o odómetro para continuar a condução.`}
+              : `Atividade: ${ACTIVITY_LABELS[activityType]}. A condução será retomada ao finalizar.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -71,20 +66,6 @@ export function NonDrivingActivityDialog({
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="non-driving-km">KM atual do veículo</Label>
-            <Input
-              id="non-driving-km"
-              type="number"
-              min="0"
-              step="1"
-              inputMode="numeric"
-              placeholder="125500"
-              value={currentKm}
-              onChange={event => onKmChange(event.target.value)}
-              className="h-12 text-base"
-            />
-          </div>
         </div>
 
         <DialogFooter className="flex-col gap-2 sm:flex-row">

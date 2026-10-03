@@ -135,6 +135,9 @@ export async function PUT(
     if (parsedStartKm && !parsedStartKm.valid || parsedEndKm && !parsedEndKm.valid) {
       return NextResponse.json({ error: 'KM deve ser um inteiro não negativo' }, { status: 400 });
     }
+    if (body.endTime && !existingWorkDay.endTime && (!parsedEndKm?.valid || parsedEndKm.value === null)) {
+      return NextResponse.json({ error: 'KM final é obrigatório para encerrar a jornada' }, { status: 400 });
+    }
     if (body.startKm !== undefined) dataToUpdate.startKm = parsedStartKm?.value ?? null;
     if (body.endKm !== undefined) dataToUpdate.endKm = parsedEndKm?.value ?? null;
     const startKm = body.startKm !== undefined ? parsedStartKm?.value : existingWorkDay.startKm;

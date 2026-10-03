@@ -218,7 +218,7 @@ export function useWorkDays() {
   );
 
   const changeNonDrivingActivity = useCallback(
-    async (dayId: string, action: 'start' | 'finish', currentKm: string, type?: WorkActivityType): Promise<WorkDay> => {
+    async (dayId: string, action: 'start' | 'finish', type?: WorkActivityType): Promise<WorkDay> => {
       const now = new Date();
       const res = await fetch(`/api/workdays/${dayId}/activities`, {
         method: 'POST',
@@ -226,7 +226,6 @@ export function useWorkDays() {
         body: JSON.stringify({
           action,
           ...(type ? { type } : {}),
-          currentKm,
           currentAt: now.toISOString(),
           utcOffset: getUtcOffsetString(now),
         }),
@@ -267,14 +266,13 @@ export function useWorkDays() {
 
   /** Pausa a condução — envia currentTime do cliente para evitar bugs de fuso */
   const pauseDriving = useCallback(
-    async (workDayId: string, currentKm?: string): Promise<WorkDay> => {
+    async (workDayId: string): Promise<WorkDay> => {
       const res = await fetch('/api/driving-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workDayId,
           action: 'pause',
-          currentKm: currentKm || null,
           currentTime: getLocalTimeString(),
           utcOffset: getUtcOffsetString(),
         }),
@@ -295,14 +293,13 @@ export function useWorkDays() {
 
   /** Retoma a condução — envia currentTime do cliente para evitar bugs de fuso */
   const resumeDriving = useCallback(
-    async (workDayId: string, currentKm?: string): Promise<WorkDay> => {
+    async (workDayId: string): Promise<WorkDay> => {
       const res = await fetch('/api/driving-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workDayId,
           action: 'resume',
-          currentKm: currentKm || null,
           currentTime: getLocalTimeString(),
           utcOffset: getUtcOffsetString(),
         }),

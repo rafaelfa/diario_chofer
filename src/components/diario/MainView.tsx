@@ -236,10 +236,14 @@ export function MainView({
                         <Label className="text-xs text-muted-foreground flex items-center gap-1">
                           <Gauge className="h-3 w-3" />
                           KM Inicial
+                          <span className="text-red-500 font-bold">*</span>
                         </Label>
                         <Input
                           ref={startKmInputRef}
                           type="number"
+                          min="0"
+                          step="1"
+                          required
                           placeholder="125000"
                           value={startForm.startKm}
                           onChange={(e) => setStartForm({ ...startForm, startKm: e.target.value })}
@@ -696,13 +700,14 @@ export function MainView({
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">KM Final</Label>
-                      <Input type="number" placeholder="125500" value={endForm.endKm} onChange={(e) => setEndForm({ ...endForm, endKm: e.target.value })} className="h-12" />
-                      {currentDay.lastSessionKm ? (
-                        <p className="text-[10px] text-muted-foreground">Último: {currentDay.lastSessionKm.toLocaleString()}</p>
-                      ) : currentDay.startKm ? (
-                        <p className="text-[10px] text-muted-foreground">Mín: {currentDay.startKm}</p>
-                      ) : null}
+                      <Label className="text-xs">
+                        KM Final
+                        <span className="text-red-500 font-bold ml-1">*</span>
+                      </Label>
+                      <Input type="number" min="0" step="1" required placeholder="125500" value={endForm.endKm} onChange={(e) => setEndForm({ ...endForm, endKm: e.target.value })} className="h-12" />
+                      {currentDay.startKm != null && (
+                        <p className="text-[10px] text-muted-foreground">Mín: {currentDay.startKm.toLocaleString()}</p>
+                      )}
                     </div>
                   </div>
                   <div className="space-y-1">

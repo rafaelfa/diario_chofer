@@ -45,6 +45,7 @@ test('calcKmTraveled rejects invalid session mileage and supports zero readings'
   assert.equal(calcKmTraveled([{ startKm: 100, endKm: 180 }, { startKm: 180, endKm: 240 }]), 140);
   assert.equal(calcKmTraveled([{ startKm: 180, endKm: 100 }]), null);
   assert.equal(calcKmTraveled([], 0, 0), 0);
+  assert.equal(calcKmTraveled([{ startKm: 100, endKm: null }, { startKm: null, endKm: 150 }], 100, 150), 50);
 });
 
 test('calcWorkDayHours counts only the requested driver by default', () => {

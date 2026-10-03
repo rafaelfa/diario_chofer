@@ -46,9 +46,9 @@ export default function DiarioMotorista() {
     currentUser, currentDay, workDays, isLoading,
     viewingDay, setViewingDay, editingDay, setEditingDay,
     editForm, setEditForm, deleteConfirm, setDeleteConfirm,
-    showPauseDialog, setShowPauseDialog, pauseKm, setPauseKm, isProcessingPause,
+    showPauseDialog, setShowPauseDialog, isProcessingPause,
     showActivityDialog, setShowActivityDialog, activityType, setActivityType,
-    activityKm, setActivityKm, isProcessingActivity,
+    isProcessingActivity,
     breakState,
     breakMinutes,
     conformity, workingTime, continuousTime,
@@ -214,12 +214,9 @@ export default function DiarioMotorista() {
         <PauseDialog
           open={showPauseDialog}
           onClose={() => setShowPauseDialog(false)}
-          pauseKm={pauseKm}
-          onKmChange={setPauseKm}
           onConfirm={currentDay.isPaused ? handleConfirmResume : handlePauseDriving}
           isProcessing={isProcessingPause}
           isResume={currentDay.isPaused}
-          lastKnownKm={currentDay.lastSessionKm || currentDay.startKm}
         />
       )}
 
@@ -229,8 +226,6 @@ export default function DiarioMotorista() {
           mode={currentDay.activeWorkActivity ? 'finish' : 'start'}
           activityType={currentDay.activeWorkActivity?.type ?? activityType}
           onActivityTypeChange={setActivityType}
-          currentKm={activityKm}
-          onKmChange={setActivityKm}
           onClose={() => setShowActivityDialog(false)}
           onConfirm={handleConfirmNonDrivingActivity}
           isProcessing={isProcessingActivity}

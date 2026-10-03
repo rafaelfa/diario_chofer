@@ -16,6 +16,12 @@ export const MAX_DAILY_DRIVING_EXCEPTION_H = 10;
 export const MAX_WEEKLY_DRIVING_H = 56;
 export const MAX_BIWEEKLY_DRIVING_H = 90;
 
+/** Condução contínua máxima antes da pausa obrigatória (Art. 5º): 4h30 */
+export const MAX_CONTINUOUS_DRIVING_H = 4.5;
+export const MAX_CONTINUOUS_DRIVING_MIN = 270;
+/** Pausa legal mínima que reinicia o contador de condução contínua: 45min */
+export const LEGAL_BREAK_MINUTES = 45;
+
 /** Retorna segunda-feira da semana ISO que contém a data */
 export function getMonday(d: Date): Date {
   const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));

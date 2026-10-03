@@ -3,9 +3,9 @@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Eye, Clock, Truck, FileText, CheckCircle2, Pencil } from 'lucide-react';
+import { Eye, Clock, Truck, FileText, CheckCircle2, Pencil, BriefcaseBusiness } from 'lucide-react';
 import type { WorkDay } from '@/lib/types';
-import { diffInMinutes, formatDecimalHours } from '@/lib/time';
+import { diffInMinutes, formatDecimalHours, calcWorkActivityMinutes } from '@/lib/time';
 
 interface ViewDayDialogProps {
   day: WorkDay | null;
@@ -221,6 +221,52 @@ export function ViewDayDialog({ day, onClose, onEdit }: ViewDayDialogProps) {
               <span>Pausado</span>
             </div>
           </div>
+
+          {day.workActivities && day.workActivities.length > 0 && (
+            <div className="border rounded-lg p-3">
+              <p className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <BriefcaseBusiness className="h-4 w-4 text-blue-700" />
+                Atividades sem condução
+                <Badge variant="outline" className="ml-auto text-blue-700 dark:text-blue-300">
+                  {formatDecimalHours(calcWorkActivityMinutes(day.workActivities) / 60)}
+                </Badge>
+              </p>
+              <div className="space-y-2">
+                {day.workActivities.map(activity => {
+                  const labels = {
+                    loading: 'Carregamento',
+                    unloading: 'Descarregamento',
+                    refueling: 'Abastecimento',
+                    other: 'Outro trabalho',
+                  };
+                  const start = new Date(activity.startedAt);
+                  const end = activity.endedAt ? new Date(activity.endedAt) : null;
+                  const durationMinutes = end ? Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000)) : null;
+                  const duration = durationMinutes === null
+                    ? 'Em andamento'
+                    : `${Math.floor(durationMinutes / 60)}h${String(durationMinutes % 60).padStart(2, '0')}`;
+
+                  return (
+                    <div key={activity.id} className="rounded-md border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900 dark:bg-blue-950/30">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{labels[activity.type as keyof typeof labels] ?? 'Atividade'}</span>
+                        <Badge variant="outline" className="text-xs">{duration}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {start.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
+                        {' → '}
+                        {end ? end.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }) : 'em andamento'}
+                        {' · Motorista '}{activity.driverNumber}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Odómetro: {activity.startKm ?? '--'} → {activity.endKm ?? '--'} km
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           
           {/* Eventos */}
           {day.events.length > 0 && (

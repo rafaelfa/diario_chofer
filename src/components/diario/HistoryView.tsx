@@ -6,10 +6,10 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   RefreshCw, Calendar, Activity, Moon, Pause,
-  CheckCircle2, Truck, Eye, Pencil, Trash2,
+  CheckCircle2, Truck, Eye, Pencil, Trash2, BriefcaseBusiness,
 } from 'lucide-react';
 import type { WorkDay } from '@/lib/types';
-import { formatDecimalHours } from '@/lib/time';
+import { formatDecimalHours, calcWorkActivityMinutes } from '@/lib/time';
 
 interface HistoryViewProps {
   workDays: WorkDay[];
@@ -130,6 +130,12 @@ export function HistoryView({
                       <Badge variant="outline" className="text-xs bg-amber-50 dark:bg-amber-900/30 text-amber-700">
                         <Pause className="h-3 w-3 mr-1" />
                         Pausado
+                      </Badge>
+                    )}
+                    {day.workActivities && day.workActivities.length > 0 && (
+                      <Badge variant="outline" className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                        <BriefcaseBusiness className="h-3 w-3 mr-1" />
+                        serviço {formatDecimalHours(calcWorkActivityMinutes(day.workActivities) / 60)}
                       </Badge>
                     )}
                     {day.truckCheck && (

@@ -12,7 +12,7 @@ import {
   Truck, Play, Square, Plus, Clock, MapPin, Gauge,
   CheckCircle2, Calendar, FileText,
   Sun, Moon, Activity, AlertCircle, RefreshCw,
-  Navigation, Pause, FastForward, Users,
+  Navigation, Pause, FastForward, Users, BriefcaseBusiness, PackageOpen,
 } from 'lucide-react';
 import type { WorkDay, Report } from '@/lib/types';
 import { formatDecimalHours } from '@/lib/time';
@@ -21,6 +21,8 @@ import { AmplitudeCard } from '@/components/AmplitudeCard';
 import { CircularTimeCounter } from '@/components/diario/CircularTimeCounter';
 import { DayTimeline } from '@/components/diario/DayTimeline';
 import { TrafficLightStatus } from '@/components/diario/TrafficLightStatus';
+import { ContinuousDrivingBar } from '@/components/diario/ContinuousDrivingBar';
+import { ACTIVITY_LABELS } from '@/components/diario/NonDrivingActivityDialog';
 import { WeeklyBars } from '@/components/diario/WeeklyBars';
 import { BreakTimer } from '@/components/diario/BreakTimer';
 import { WeeklyRestAlert } from '@/components/diario/WeeklyRestAlert';
@@ -42,6 +44,8 @@ interface MainViewProps {
   weeklyReport: Report | null;
   conformity: ConformityStatus;
   workingTime: WorkingTimeResult;
+  /** Condução contínua desde a última pausa legal (limite 4h30) */
+  continuousTime: WorkingTimeResult;
   startForm: StartFormState;
   setStartForm: React.Dispatch<React.SetStateAction<StartFormState>>;
   endForm: EndFormState;
@@ -66,6 +70,7 @@ interface MainViewProps {
   onAddEvent: () => Promise<void>;
   onResumeDriving: () => void;
   onOpenPauseDialog: () => void;
+  onOpenNonDrivingActivity: () => void;
   onLoadWorkDays: () => Promise<void>;
   isStarting?: boolean;
   isEnding?: boolean;
@@ -80,7 +85,7 @@ interface MainViewProps {
 }
 
 export function MainView({
-  currentDay, workDays = [], isLoading, weeklyReport, conformity, workingTime,
+  currentDay, workDays = [], isLoading, weeklyReport, conformity, workingTime, continuousTime,
   startForm, setStartForm,
   endForm, setEndForm,
   newEvent, setNewEvent,
@@ -91,7 +96,7 @@ export function MainView({
   loadingGps, gpsError, getLocation,
   formatTime, formatDate, checkLastKm,
   onStartDay, onEndDay, onAddEvent,
-  onResumeDriving, onOpenPauseDialog,
+  onResumeDriving, onOpenPauseDialog, onOpenNonDrivingActivity,
   onLoadWorkDays,
   isStarting,
   isEnding,
@@ -347,6 +352,64 @@ export function MainView({
                       />
                     </div>
 
+                    {/* Modo de arranque — condução ou serviço (carregamento/abastecimento) */}
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Play className="h-3 w-3" />
+                        Iniciar o dia em
+                      </Label>
+                      <div className="flex gap-1 bg-slate-200 dark:bg-slate-700 rounded-lg p-1">
+                        <button
+                          type="button"
+                          onClick={() => setStartForm({ ...startForm, startMode: 'driving' })}
+                          className={`flex-1 px-3 py-2 rounded-md text-sm font-semibold transition-all ${
+                            startForm.startMode === 'driving'
+                              ? 'bg-white dark:bg-slate-600 text-emerald-600 shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          Condução
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStartForm({ ...startForm, startMode: 'service' })}
+                          className={`flex-1 px-3 py-2 rounded-md text-sm font-semibold transition-all ${
+                            startForm.startMode === 'service'
+                              ? 'bg-white dark:bg-slate-600 text-blue-600 shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          Serviço
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {startForm.startMode === 'service'
+                          ? 'A amplitude conta desde o início da jornada; a condução só começa quando você retomar.'
+                          : 'A condução começa a contar já no horário de início da jornada.'}
+                      </p>
+                      {startForm.startMode === 'service' && (
+                        <div className="space-y-1">
+                          <Label htmlFor="initial-activity" className="text-xs">Tipo de serviço</Label>
+                          <select
+                            id="initial-activity"
+                            value={startForm.initialActivityType}
+                            onChange={(e) =>
+                              setStartForm({
+                                ...startForm,
+                                initialActivityType: e.target.value as StartFormState['initialActivityType'],
+                              })
+                            }
+                            className="h-12 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            <option value="loading">Carregamento</option>
+                            <option value="unloading">Descarregamento</option>
+                            <option value="refueling">Abastecimento</option>
+                            <option value="other">Outro trabalho sem condução</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
                     <Button
                       onClick={() => onStartDay()}
                       className="w-full bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 h-16 text-lg font-bold shadow-lg"
@@ -463,10 +526,16 @@ export function MainView({
                   breakMinutes={breakMinutes}
                 />
 
+                {/* Condução contínua — 4h30 exigem pausa legal de 45min (Reg. CE 561/2006, Art. 5º) */}
+                <div className="mt-3">
+                  <ContinuousDrivingBar minutes={continuousTime.totalMinutes} />
+                </div>
+
                 <div className="mt-4">
                   <DayTimeline
                     startTime={currentDay.startTime}
                     sessions={currentDay.drivingSessions}
+                    activities={currentDay.workActivities}
                     numDrivers={currentDay.numDrivers}
                   />
                 </div>
@@ -484,6 +553,27 @@ export function MainView({
                   onResume={onEndBreak}
                 />
               </div>
+            ) : currentDay.activeWorkActivity ? (
+              <Card className="border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950 dark:to-slate-900">
+                <CardContent className="pt-4">
+                  <div className="text-center space-y-3">
+                    <div className="flex items-center justify-center gap-2 text-blue-700 dark:text-blue-300">
+                      <PackageOpen className="h-6 w-6" />
+                      <span className="font-bold text-lg">Atividade sem condução</span>
+                    </div>
+                    <Badge variant="outline" className="border-blue-300 text-blue-700 dark:text-blue-300">
+                      {ACTIVITY_LABELS[currentDay.activeWorkActivity.type]}
+                    </Badge>
+                    <p className="text-sm text-muted-foreground">
+                      O contador de condução está parado. A amplitude do dia continua contando.
+                    </p>
+                    <Button onClick={onOpenNonDrivingActivity} className="w-full h-14 bg-blue-700 hover:bg-blue-800 text-base font-bold">
+                      <FastForward className="h-5 w-5 mr-2" />
+                      RETOMAR CONDUÇÃO
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             ) : currentDay.isPaused && currentDay.numDrivers === 2 ? (
               /* Paused state for 2 drivers - existing card */
               <Card className="border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950 dark:to-slate-900">
@@ -509,7 +599,7 @@ export function MainView({
               </Card>
             ) : (
               /* PAUSAR + EVENTO buttons for ALL drivers */
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 {currentDay.numDrivers === 2 ? (
                   <Button onClick={onOpenPauseDialog} variant="outline" className="h-14 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700 text-base font-medium">
                     <Pause className="h-5 w-5 mr-2" />
@@ -521,6 +611,10 @@ export function MainView({
                     PAUSAR
                   </Button>
                 )}
+                <Button onClick={onOpenNonDrivingActivity} variant="outline" className="h-14 border-blue-400 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700 text-xs sm:text-sm font-medium">
+                  <BriefcaseBusiness className="h-5 w-5 mr-1" />
+                  SERVIÇO
+                </Button>
                 <Button onClick={() => setShowEventInput(true)} variant="outline" className="h-14 border-blue-400 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700 text-base font-medium">
                   <Plus className="h-5 w-5 mr-2" />
                   EVENTO

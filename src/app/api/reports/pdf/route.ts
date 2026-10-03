@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { requireAuth } from '@/lib/auth';
-import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours, calcWorkActivityMinutes, formatDecimalHours } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
 import { formatDatePtServer } from '@/lib/timezone';
 import { escapeHtml } from '@/lib/html';
@@ -19,7 +19,7 @@ import {
 import { endOfUtcDay, isValidTimezone, parseDateOnlyUtc, startOfUtcDay } from '@/lib/validators';
 
 type ReportWorkDay = Prisma.WorkDayGetPayload<{
-  include: { events: true; drivingSessions: true };
+  include: { events: true; drivingSessions: true; workActivities: true };
 }>;
 
 interface ReportHtmlData {
@@ -45,6 +45,8 @@ interface ReportHtmlData {
     endKm: number | string;
     kmTraveled: number;
     hours: number;
+    /** Minutos em atividades sem condução (carregamento, abastecimento, ...) */
+    activityMinutes: number;
     startCountry: string;
     endCountry: string;
     events: number;
@@ -106,6 +108,9 @@ export async function GET(request: NextRequest) {
           events: true,
           drivingSessions: {
             orderBy: { createdAt: 'asc' }
+          },
+          workActivities: {
+            orderBy: { startedAt: 'asc' }
           }
         },
         orderBy: { createdAt: 'asc' }
@@ -174,6 +179,9 @@ export async function GET(request: NextRequest) {
           events: true,
           drivingSessions: {
             orderBy: { createdAt: 'asc' }
+          },
+          workActivities: {
+            orderBy: { startedAt: 'asc' }
           }
         },
         orderBy: { date: 'asc' }
@@ -197,6 +205,9 @@ export async function GET(request: NextRequest) {
           events: true,
           drivingSessions: {
             orderBy: { createdAt: 'asc' }
+          },
+          workActivities: {
+            orderBy: { startedAt: 'asc' }
           }
         },
         orderBy: { date: 'asc' }
@@ -218,6 +229,9 @@ export async function GET(request: NextRequest) {
           events: true,
           drivingSessions: {
             orderBy: { createdAt: 'asc' }
+          },
+          workActivities: {
+            orderBy: { startedAt: 'asc' }
           }
         },
         orderBy: { date: 'asc' }
@@ -262,6 +276,7 @@ export async function GET(request: NextRequest) {
         endKm: day.endKm ?? '-',
         kmTraveled: dayKm,
         hours: parseFloat(dayHours.toFixed(1)),
+        activityMinutes: calcWorkActivityMinutes(day.workActivities),
         startCountry: day.startCountry || '-',
         endCountry: day.endCountry || '-',
         events: day.events.length,
@@ -668,6 +683,10 @@ function generateReportHTML(data: ReportHtmlData): string {
       <div class="day-info-item">
         <div class="label">Horas Condução</div>
         <div class="value">${d.hours}h</div>
+      </div>
+      <div class="day-info-item">
+        <div class="label">Serviço sem Condução</div>
+        <div class="value">${formatDecimalHours(d.activityMinutes / 60)}</div>
       </div>
     </div>
     

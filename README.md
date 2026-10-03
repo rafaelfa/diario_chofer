@@ -20,6 +20,9 @@ Aplicacao web responsiva para registrar jornadas de motoristas, sessoes de condu
 - Abertura e encerramento de jornadas com data, horarios, paises, matricula, verificacao do veiculo, odometro e observacoes.
 - Jornadas com um ou dois motoristas, identificacao do motorista principal e alternancia de sessoes na troca de condutor.
 - Pausas continuas ou divididas para jornadas individuais; o inicio e o total concluido ficam persistidos no banco.
+- Atividades sem conducao — carregamento, descarregamento, abastecimento e outro trabalho — que interrompem a sessao de conducao sem interromper a amplitude da jornada.
+- Contador de conducao continua de 4h30 (Reg. CE 561/2006, Art. 5o): reinicia apenas quando termina uma pausa legal de 45min; atividade de servico congela a conducao mas nao zera o contador.
+- Inicio de jornada em conducao ou em servico: no modo servico a jornada abre com a atividade em curso e sem sessao de conducao ativa.
 - Eventos vinculados a uma jornada, como abastecimento, fronteiras e anotacoes.
 - Historico de jornadas, consulta do ultimo odometro por matricula, estatisticas por veiculo e relatorios semanais, mensais, por periodo e para impressao em PDF.
 - Alertas auxiliares de conducao diaria, semanal e em duas semanas, considerando sessoes e pausas registradas.
@@ -35,7 +38,7 @@ Aplicacao web responsiva para registrar jornadas de motoristas, sessoes de condu
 - `prisma/migrations`: migrations versionadas.
 - `public/sw.js`: service worker; limita o cache a recursos estaticos e a pagina offline.
 
-Modelos principais: `AppUser`, `WorkDay`, `DrivingSession`, `Event`, `Settings` e `RateLimit`. As sessoes guardam `driverNumber`; a jornada guarda `primaryDriverNumber`, usado para separar o calculo pessoal do total de utilizacao do veiculo.
+Modelos principais: `AppUser`, `WorkDay`, `DrivingSession`, `WorkActivity`, `Event`, `Settings` e `RateLimit`. `WorkActivity` guarda os intervalos de trabalho sem conducao. As sessoes guardam `driverNumber`; a jornada guarda `primaryDriverNumber`, usado para separar o calculo pessoal do total de utilizacao do veiculo. `WorkDay.drivingMinutesAtLastBreak` guarda o total de conducao no momento em que terminou a ultima pausa legal, base do contador de conducao continua.
 
 ## Executar localmente
 
@@ -85,7 +88,7 @@ npm run db:deploy
 npm run db:generate
 ```
 
-A migration `20260402_init` cria as tabelas-base. As migrations seguintes adicionam fuso horario, numero de motoristas, pausas, atribuicao de motorista e rate limit persistente.
+A migration `20260402_init` cria as tabelas-base. As migrations seguintes adicionam fuso horario, numero de motoristas, pausas, atribuicao de motorista e rate limit persistente. As mais recentes, `20260929_add_work_activities` e `20260929_add_continuous_driving_baseline`, criam a tabela `work_activities` e a coluna `driving_minutes_at_last_break`.
 
 ### Banco Neon existente
 
@@ -106,6 +109,23 @@ ALTER TABLE "work_days" ADD COLUMN IF NOT EXISTS "break_type" TEXT;
 ALTER TABLE "work_days" ADD COLUMN IF NOT EXISTS "break_minutes" INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE "driving_sessions" ADD COLUMN IF NOT EXISTS "driver_number" INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE "work_days" ADD COLUMN IF NOT EXISTS "primary_driver_number" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "work_days" ADD COLUMN IF NOT EXISTS "driving_minutes_at_last_break" INTEGER;
+
+CREATE TABLE IF NOT EXISTS "work_activities" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "work_day_id" TEXT NOT NULL REFERENCES "work_days"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  "user_id" TEXT NOT NULL REFERENCES "app_users"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  "driver_number" INTEGER NOT NULL DEFAULT 1,
+  "type" TEXT NOT NULL,
+  "started_at" TIMESTAMP(3) NOT NULL,
+  "ended_at" TIMESTAMP(3),
+  "start_km" INTEGER,
+  "end_km" INTEGER,
+  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TIMESTAMP(3) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "work_activities_user_id_idx" ON "work_activities"("user_id");
+CREATE INDEX IF NOT EXISTS "work_activities_work_day_id_ended_at_idx" ON "work_activities"("work_day_id", "ended_at");
 
 CREATE TABLE IF NOT EXISTS "rate_limits" (
     "identifier" TEXT NOT NULL PRIMARY KEY,
@@ -128,7 +148,8 @@ WHERE table_schema = 'public'
   AND (
     (table_name = 'work_days' AND column_name IN (
       'timezone', 'utc_offset', 'num_drivers', 'break_start',
-      'break_type', 'break_minutes', 'primary_driver_number'
+      'break_type', 'break_minutes', 'primary_driver_number',
+      'driving_minutes_at_last_break'
     ))
     OR
     (table_name = 'driving_sessions' AND column_name IN ('utc_offset', 'driver_number'))
@@ -158,8 +179,9 @@ Todas as rotas de dados exigem sessao autenticada; o middleware/Proxy libera ape
 | `/api/auth/register` | `POST` criar conta, limitado por IP |
 | `/api/auth/logout` | `POST` terminar sessao |
 | `/api/auth/me` | `GET` consultar sessao |
-| `/api/workdays` | `GET` listar; `POST` iniciar jornada |
+| `/api/workdays` | `GET` listar; `POST` iniciar jornada com `startMode: 'driving'` (padrao) ou `startMode: 'service'` + `initialActivityType` |
 | `/api/workdays/:id` | `GET`, `PUT`, `DELETE` jornada do usuario |
+| `/api/workdays/:id/activities` | `POST` com `action: start` ou `finish` para uma atividade sem conducao |
 | `/api/driving-sessions?workDayId=...` | `GET` sessoes; `POST` com `action: pause` ou `resume` |
 | `/api/events` | `GET` eventos; `POST` criar evento |
 | `/api/matricula/lastkm?matricula=...` | `GET` ultimo odometro do veiculo |
@@ -172,7 +194,7 @@ Todas as rotas de dados exigem sessao autenticada; o middleware/Proxy libera ape
 
 ## Testes
 
-`npm test` cobre parsing de `HH:MM`, passagem da meia-noite, duracao de sessoes, odometros, pausas, selecao de motorista, semanas ISO, limites diarios/semanal/quinzenal e formatacao em fusos negativos. Antes de publicar, rode `npm test`, `npm run lint`, `npx tsc --noEmit` e `npm run build`.
+`npm test` cobre parsing de `HH:MM`, passagem da meia-noite, duracao de sessoes, odometros, pausas, separacao entre conducao e atividades de trabalho (com sessoes e janelas que cruzam a meia-noite), contador de conducao continua de 4h30, selecao de motorista, semanas ISO, limites diarios/semanal/quinzenal e formatacao em fusos negativos. Antes de publicar, rode `npm test`, `npm run lint`, `npx tsc --noEmit` e `npm run build`.
 
 ## Limites conhecidos
 

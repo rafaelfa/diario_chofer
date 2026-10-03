@@ -15,7 +15,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import type { WorkDay } from '@/lib/types';
+import type { WorkActivityType, WorkDay } from '@/lib/types';
 import { getLocalTimeString, getUtcOffsetString } from '@/lib/timezone';
 
 interface StartDayPayload {
@@ -30,6 +30,9 @@ interface StartDayPayload {
   primaryDriverNumber: 1 | 2;
   timezone?: string;
   utcOffset?: string;
+  /** 'driving' cria logo sessão de condução; 'service' abre a jornada em atividade sem condução */
+  startMode?: 'driving' | 'service';
+  initialActivityType?: WorkActivityType;
 }
 
 interface EndDayPayload {
@@ -103,6 +106,8 @@ export function useWorkDays() {
         primaryDriverNumber: payload.primaryDriverNumber,
         timezone: payload.timezone || null,
         utcOffset: payload.utcOffset || null,
+        startMode: payload.startMode === 'service' ? 'service' : 'driving',
+        ...(payload.startMode === 'service' ? { initialActivityType: payload.initialActivityType ?? 'other' } : {}),
       }),
     });
 
@@ -179,7 +184,16 @@ export function useWorkDays() {
 
   /** Persiste o estado da pausa no banco (fire-and-forget com retry único) */
   const saveBreakState = useCallback(
-    async (dayId: string, payload: { breakStart: string | null; breakType: string | null; breakMinutes: number }): Promise<void> => {
+    async (
+      dayId: string,
+      payload: {
+        breakStart: string | null;
+        breakType: string | null;
+        breakMinutes: number;
+        /** Base do contador 4h30 — enviada só quando a pausa legal foi cumprida */
+        drivingMinutesAtLastBreak?: number;
+      }
+    ): Promise<void> => {
       const send = () => fetch(`/api/workdays/${dayId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -199,6 +213,34 @@ export function useWorkDays() {
       const updated: WorkDay = await response.json();
       setWorkDays(prev => prev.map(day => day.id === dayId ? updated : day));
       setCurrentDay(prev => prev?.id === dayId ? updated : prev);
+    },
+    []
+  );
+
+  const changeNonDrivingActivity = useCallback(
+    async (dayId: string, action: 'start' | 'finish', currentKm: string, type?: WorkActivityType): Promise<WorkDay> => {
+      const now = new Date();
+      const res = await fetch(`/api/workdays/${dayId}/activities`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          ...(type ? { type } : {}),
+          currentKm,
+          currentAt: now.toISOString(),
+          utcOffset: getUtcOffsetString(now),
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Erro ao atualizar atividade');
+      }
+
+      const updated: WorkDay = await res.json();
+      setCurrentDay(updated);
+      setWorkDays(prev => prev.map(day => day.id === updated.id ? updated : day));
+      return updated;
     },
     []
   );
@@ -293,5 +335,6 @@ export function useWorkDays() {
     pauseDriving,
     resumeDriving,
     saveBreakState,
+    changeNonDrivingActivity,
   };
 }

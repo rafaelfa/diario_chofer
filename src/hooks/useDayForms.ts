@@ -18,6 +18,8 @@ export function useDayForms() {
     matricula: '',
     numDrivers: 1,
     primaryDriverNumber: 1,
+    startMode: 'driving',
+    initialActivityType: 'loading',
   });
 
   const [endForm, setEndForm] = useState<EndFormState>({

@@ -23,6 +23,7 @@ model AppUser {
   workDays         WorkDay[]
   events           Event[]
   drivingSessions  DrivingSession[]
+  workActivities   WorkActivity[]
   settings         Settings?
 
   @@map("app_users")
@@ -54,11 +55,16 @@ model WorkDay {
   breakStart    DateTime?        @map("break_start") // Início da pausa em curso (persistida — sobrevive a refresh)
   breakType     String?          @map("break_type") // 'continuous' | 'split' | null
   breakMinutes  Int              @default(0) @map("break_minutes") // Total de minutos de pausas concluídas no dia
+  // Minutos de condução no momento em que a última pausa LEGAL terminou.
+  // Base do contador de condução contínua (4h30 — Reg. CE 561/2006, Art. 5º).
+  // Atividades sem condução (carregamento/abastecimento) nunca alteram esta base.
+  drivingMinutesAtLastBreak Int? @map("driving_minutes_at_last_break")
 
   // Relacionamentos
   user             AppUser          @relation(fields: [userId], references: [id], onDelete: Cascade)
   events           Event[]
   drivingSessions  DrivingSession[]
+  workActivities   WorkActivity[]
 
   @@index([userId])       // Índice para filtro por usuário
   @@index([matricula])    // Índice para busca por matrícula
@@ -108,6 +114,27 @@ model DrivingSession {
   @@index([workDayId])
   @@index([userId, status])
   @@map("driving_sessions")
+}
+
+model WorkActivity {
+  id           String    @id @default(cuid())
+  workDayId    String    @map("work_day_id")
+  userId       String    @map("user_id")
+  driverNumber Int       @default(1) @map("driver_number")
+  type         String
+  startedAt    DateTime  @map("started_at")
+  endedAt      DateTime? @map("ended_at")
+  startKm      Int?      @map("start_km")
+  endKm        Int?      @map("end_km")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  workDay WorkDay @relation(fields: [workDayId], references: [id], onDelete: Cascade)
+  user    AppUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([workDayId, endedAt])
+  @@map("work_activities")
 }
 
 // Configurações do usuário

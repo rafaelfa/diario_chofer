@@ -52,10 +52,70 @@ export const MAX_DAY_HOURS = 15;      // Total diário nunca deve exceder 15h
 export interface TimeCalculationOptions {
   currentTime?: string | null;
   breakMinutes?: number;
+  /**
+   * Atividades sem condução (carregamento, descarregamento, abastecimento, outro trabalho).
+   * Nunca contam como condução — só na amplitude da jornada.
+   */
+  activities?: Array<{ startedAt: string | Date; endedAt?: string | Date | null }>;
+  /** Offset UTC do registo, para converter os instantes das atividades em HH:MM */
+  utcOffset?: string | null;
+}
+
+const MINUTES_PER_DAY = 24 * 60;
+
+/**
+ * Sobreposição entre um intervalo [itemStart, itemEnd] e a janela [windowStart, windowEnd],
+ * em minutos desde a meia-noite. Testa também o intervalo deslocado +24h para cobrir
+ * valores que atravessam a meia-noite. Sempre ≥ 0.
+ */
+function overlapMinutesClamped(itemStart: number, itemEnd: number, windowStart: number, windowEnd: number): number {
+  const direct = Math.min(itemEnd, windowEnd) - Math.max(itemStart, windowStart);
+  const shifted = Math.min(itemEnd + MINUTES_PER_DAY, windowEnd) - Math.max(itemStart + MINUTES_PER_DAY, windowStart);
+  return Math.max(0, direct, shifted);
+}
+
+/**
+ * Minutos de atividades sem condução contidos numa janela "HH:MM" → "HH:MM".
+ * Atividade sem fim conta até ao fim da janela (está em curso).
+ * Usado para garantir que carregamento/abastecimento nunca entram na condução.
+ */
+export function calcActivityMinutesInRange(
+  activities: Array<{ startedAt: string | Date; endedAt?: string | Date | null }> | null | undefined,
+  rangeStart: string | null | undefined,
+  rangeEnd: string | null | undefined,
+  utcOffset?: string | null
+): number {
+  if (!activities || activities.length === 0) return 0;
+
+  const windowStart = parseTimeToMinutes(rangeStart);
+  const parsedWindowEnd = parseTimeToMinutes(rangeEnd);
+  if (windowStart === null || parsedWindowEnd === null) return 0;
+
+  const windowEnd = parsedWindowEnd > windowStart ? parsedWindowEnd : parsedWindowEnd + MINUTES_PER_DAY;
+  if (windowEnd <= windowStart) return 0;
+
+  let total = 0;
+  for (const activity of activities) {
+    const start = parseTimeToMinutes(getTimeAtUtcOffset(new Date(activity.startedAt), utcOffset));
+    if (start === null) continue;
+
+    let end: number;
+    if (activity.endedAt) {
+      const parsedEnd = parseTimeToMinutes(getTimeAtUtcOffset(new Date(activity.endedAt), utcOffset));
+      if (parsedEnd === null) continue;
+      end = parsedEnd >= start ? parsedEnd : parsedEnd + MINUTES_PER_DAY;
+    } else {
+      end = windowEnd;
+    }
+
+    total += overlapMinutesClamped(start, end, windowStart, windowEnd);
+  }
+
+  return Math.min(total, windowEnd - windowStart);
 }
 
 export function calcDrivingMinutes(
-  sessions: Array<{ startTime?: string | null; endTime?: string | null; status?: string }>,
+  sessions: Array<{ startTime?: string | null; endTime?: string | null; status?: string; utcOffset?: string | null }>,
   fallbackStart?: string | null,
   fallbackEnd?: string | null,
   options: TimeCalculationOptions = {}
@@ -71,18 +131,71 @@ export function calcDrivingMinutes(
       const endTime = session.endTime || options.currentTime;
       const difference = diffInMinutes(session.startTime, endTime);
       if (difference === null) return null;
-      totalMinutes += difference;
+      // Rede de segurança: se uma sessão abranger uma atividade sem condução,
+      // os minutos da atividade não entram na condução. As atividades são instantes
+      // absolutos, por isso converte-se com o offset da própria sessão.
+      const activityMinutes = calcActivityMinutesInRange(
+        options.activities,
+        session.startTime,
+        endTime,
+        session.utcOffset ?? options.utcOffset
+      );
+      totalMinutes += Math.max(0, difference - activityMinutes);
     }
   } else {
     const endTime = fallbackEnd || options.currentTime;
     if (!fallbackStart || !endTime) return null;
     const difference = diffInMinutes(fallbackStart, endTime);
     if (difference === null) return null;
-    totalMinutes = difference;
+    // Sem sessões registadas o tempo todo contaria como condução — desconta as atividades.
+    const activityMinutes = calcActivityMinutesInRange(
+      options.activities,
+      fallbackStart,
+      endTime,
+      options.utcOffset
+    );
+    totalMinutes = Math.max(0, difference - activityMinutes);
   }
 
   const breakMinutes = Number.isFinite(options.breakMinutes) ? Math.max(0, options.breakMinutes ?? 0) : 0;
   return Math.max(0, totalMinutes - breakMinutes);
+}
+
+/**
+ * Condução contínua desde a última pausa legal concluída (Reg. CE 561/2006, Art. 5º — 4h30).
+ * `drivingMinutesAtLastBreak` é o total de condução no momento em que a última pausa
+ * legal terminou; a base volta a zero apenas com pausa legal, nunca com atividade de serviço.
+ */
+export function calcContinuousDrivingMinutes(
+  totalDrivingMinutes: number,
+  drivingMinutesAtLastBreak?: number | null
+): number {
+  const baseline = Number.isFinite(drivingMinutesAtLastBreak)
+    ? Math.max(0, drivingMinutesAtLastBreak ?? 0)
+    : 0;
+  return Math.max(0, totalDrivingMinutes - baseline);
+}
+
+/**
+ * Total de minutos em atividades sem condução (carregamento, abastecimento, ...).
+ * Atividade em curso é contada até `now`.
+ */
+export function calcWorkActivityMinutes(
+  activities: Array<{ startedAt: string | Date; endedAt?: string | Date | null }> | null | undefined,
+  now: Date = new Date()
+): number {
+  if (!activities || activities.length === 0) return 0;
+
+  let total = 0;
+  for (const activity of activities) {
+    const start = new Date(activity.startedAt).getTime();
+    if (Number.isNaN(start)) continue;
+    const end = activity.endedAt ? new Date(activity.endedAt).getTime() : now.getTime();
+    if (Number.isNaN(end)) continue;
+    total += Math.max(0, end - start);
+  }
+
+  return Math.round(total / 60000);
 }
 
 export function calcHoursWorked(
@@ -171,6 +284,39 @@ export function getTotalBreakMinutes(
   return completed + activeMinutes;
 }
 
+export function getRemainingBreakDebt(completedBreakMinutes: number | null | undefined): number {
+  const completed = Number.isFinite(completedBreakMinutes) ? Math.max(0, completedBreakMinutes ?? 0) : 0;
+  if (completed >= 45) return 45;
+  if (completed >= 15) return 30;
+  return 45;
+}
+
+export function resolveBreakCredit(
+  elapsedMinutes: number,
+  remainingDebtMinutes: number = 45
+): {
+  creditedMinutes: number;
+  remainingDebtMinutes: number;
+  resetContinuous: boolean;
+} {
+  const safeElapsed = Number.isFinite(elapsedMinutes) ? Math.max(0, elapsedMinutes) : 0;
+  const debt = Number.isFinite(remainingDebtMinutes) ? Math.max(0, remainingDebtMinutes) : 45;
+  const normalizedDebt = debt === 0 ? 45 : debt;
+
+  if (normalizedDebt >= 45) {
+    if (safeElapsed >= 45) return { creditedMinutes: 45, remainingDebtMinutes: 45, resetContinuous: true };
+    if (safeElapsed >= 15) return { creditedMinutes: 15, remainingDebtMinutes: 30, resetContinuous: false };
+    return { creditedMinutes: 0, remainingDebtMinutes: 45, resetContinuous: false };
+  }
+
+  if (normalizedDebt === 30) {
+    if (safeElapsed >= 30) return { creditedMinutes: 30, remainingDebtMinutes: 45, resetContinuous: true };
+    return { creditedMinutes: 0, remainingDebtMinutes: 30, resetContinuous: false };
+  }
+
+  return { creditedMinutes: 0, remainingDebtMinutes: normalizedDebt || 45, resetContinuous: false };
+}
+
 export function calcWorkDayHours(
   workDay: {
     startTime?: string | null;
@@ -179,6 +325,7 @@ export function calcWorkDayHours(
     primaryDriverNumber?: number | null;
     breakMinutes?: number | null;
     breakStart?: Date | string | null;
+    workActivities?: Array<{ startedAt: string | Date; endedAt?: string | Date | null }>;
     drivingSessions?: Array<{
       startTime?: string | null;
       endTime?: string | null;
@@ -198,5 +345,7 @@ export function calcWorkDayHours(
   return calcHoursWorked(sessions, workDay.startTime, workDay.endTime, {
     currentTime: getTimeAtUtcOffset(now, activeSession?.utcOffset ?? workDay.utcOffset),
     breakMinutes: getTotalBreakMinutes(workDay.breakMinutes, workDay.breakStart, now),
+    activities: workDay.workActivities,
+    utcOffset: workDay.utcOffset,
   });
 }

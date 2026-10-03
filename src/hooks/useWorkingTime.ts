@@ -9,11 +9,16 @@
  *   Breaks (30+15 or 45min) are excluded from this calculation.
  *   The TrafficLightStatus and CircularTimeCounter show DRIVING time only.
  *   The AmplitudeCard (separate) shows total amplitude including breaks.
+ *
+ * IMPORTANT (v4.2.0): Non-driving work activities (loading, unloading, refueling)
+ *   never count as driving — they only extend the day's amplitude.
+ *   `calculateContinuousTime` tracks driving since the last LEGAL break (4h30 limit);
+ *   an activity neither adds to it nor resets it.
  */
 
 import { useCallback } from 'react';
 import type { WorkDay } from '@/lib/types';
-import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
+import { calcDrivingMinutes, calcContinuousDrivingMinutes, minutesToFormatted } from '@/lib/time';
 import { formatDatePt, getLocalTimeString } from '@/lib/timezone';
 import type { ConformityStatus, WorkingTimeResult, BreakState } from './useDiarioActions';
 
@@ -51,7 +56,12 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
       sessions,
       currentDay.startTime,
       currentDay.endTime,
-      { currentTime: now ? getLocalTimeString(now) : undefined, breakMinutes: getBreakMinutes() }
+      {
+        currentTime: now ? getLocalTimeString(now) : undefined,
+        breakMinutes: getBreakMinutes(),
+        activities: currentDay.workActivities,
+        utcOffset: currentDay.utcOffset,
+      }
     ) ?? 0;
 
     return {
@@ -61,6 +71,25 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
       totalMinutes: drivingMinutes,
     };
   }, [currentDay, getBreakMinutes, now]);
+
+  /**
+   * Condução contínua desde a última pausa legal concluída (Reg. CE 561/2006, Art. 5º — 4h30).
+   * Carregamento/abastecimento não somam aqui (não são condução) e também não reiniciam
+   * o contador — só a pausa legal de 45min o reinicia.
+   */
+  const calculateContinuousTime = useCallback((): WorkingTimeResult => {
+    const totalMinutes = calcContinuousDrivingMinutes(
+      calculateWorkingTime().totalMinutes,
+      currentDay?.drivingMinutesAtLastBreak
+    );
+
+    return {
+      hours: Math.floor(totalMinutes / 60),
+      minutes: totalMinutes % 60,
+      formatted: minutesToFormatted(totalMinutes),
+      totalMinutes,
+    };
+  }, [calculateWorkingTime, currentDay?.drivingMinutesAtLastBreak]);
 
   const getConformityStatus = useCallback((): ConformityStatus => {
     if (!currentDay?.startTime) return { status: 'ok', message: '' };
@@ -90,6 +119,7 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
 
   return {
     calculateWorkingTime,
+    calculateContinuousTime,
     getBreakMinutes,
     getConformityStatus,
     formatTime,

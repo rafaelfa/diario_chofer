@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
       include: {
         events:          { orderBy: { time: 'asc' } },
         drivingSessions: { orderBy: { createdAt: 'asc' } },
+        workActivities:  { orderBy: { startedAt: 'asc' } },
       },
       orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
     });
@@ -52,6 +53,7 @@ export async function GET(request: NextRequest) {
         totalEvents:  day.events.length,
         lastSessionKm,
         sessionCount: sessions.length,
+        activeWorkActivity: day.workActivities.find(activity => !activity.endedAt) ?? null,
       };
     });
 
@@ -74,6 +76,12 @@ export async function POST(request: NextRequest) {
     log('POST /api/workdays — body recebido');  // sem dados sensíveis em prod
 
     const { date, startTime, startCountry, startKm, lastRest, truckCheck, matricula, numDrivers, primaryDriverNumber, timezone, utcOffset } = body;
+
+    // Modo de arranque: 'driving' cria logo uma sessão de condução ativa;
+    // 'service' abre a jornada em atividade sem condução (carregamento/abastecimento/...).
+    const startMode = body.startMode === 'service' ? 'service' : 'driving';
+    const ACTIVITY_TYPES = new Set(['loading', 'unloading', 'refueling', 'other']);
+    const initialActivityType = ACTIVITY_TYPES.has(body.initialActivityType) ? body.initialActivityType : 'other';
 
     if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json({ error: 'Data inválida' }, { status: 400 });
@@ -133,6 +141,15 @@ export async function POST(request: NextRequest) {
     }
 
     const resolvedStartTime = startTime;
+    const driverNumber = Number(numDrivers) === 2 && Number(primaryDriverNumber) === 2 ? 2 : 1;
+
+    // Instante de início da atividade quando a jornada arranca em modo serviço:
+    // data + hora local + offset registado no arranque.
+    const resolvedOffset = typeof utcOffset === 'string' && /^[+-](?:0\d|1[0-4]):[0-5]\d$/.test(utcOffset) ? utcOffset : '+00:00';
+    const parsedActivityStart = new Date(`${date}T${startTime}:00${resolvedOffset}`);
+    const activityStartedAt = Number.isNaN(parsedActivityStart.getTime())
+      ? new Date(`${date}T${startTime}:00Z`)
+      : parsedActivityStart;
 
     const workDay = await db.$transaction(async transaction => {
       const openDay = await transaction.workDay.findFirst({ where: { userId, endTime: null }, select: { id: true } });
@@ -149,27 +166,44 @@ export async function POST(request: NextRequest) {
           truckCheck:   truckCheck === true,
           matricula:    matricula ? matricula.toUpperCase() : null,
           numDrivers:   Number(numDrivers) === 2 ? 2 : 1,
-          primaryDriverNumber: Number(numDrivers) === 2 && Number(primaryDriverNumber) === 2 ? 2 : 1,
+          primaryDriverNumber: driverNumber,
           timezone:     typeof timezone === 'string' ? timezone : null,
           utcOffset:    typeof utcOffset === 'string' ? utcOffset : null,
-          drivingSessions: {
-            create: {
-              userId,
-              startTime: resolvedStartTime,
-              startKm:   kmValue,
-              status:    'active',
-              driverNumber: Number(numDrivers) === 2 && Number(primaryDriverNumber) === 2 ? 2 : 1,
-              utcOffset: typeof utcOffset === 'string' ? utcOffset : null,
-            },
-          },
+          ...(startMode === 'driving'
+            ? {
+                drivingSessions: {
+                  create: {
+                    userId,
+                    startTime: resolvedStartTime,
+                    startKm:   kmValue,
+                    status:    'active',
+                    driverNumber,
+                    utcOffset: typeof utcOffset === 'string' ? utcOffset : null,
+                  },
+                },
+              }
+            : {
+                workActivities: {
+                  create: {
+                    userId,
+                    driverNumber,
+                    type: initialActivityType,
+                    startedAt: activityStartedAt,
+                    startKm: kmValue,
+                  },
+                },
+              }),
         },
-        include: { events: true, drivingSessions: true },
+        include: { events: true, drivingSessions: true, workActivities: true },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     log('POST /api/workdays — criado id:', workDay.id);
 
-    return NextResponse.json(workDay);
+    return NextResponse.json({
+      ...workDay,
+      activeWorkActivity: workDay.workActivities.find(activity => !activity.endedAt) ?? null,
+    });
   } catch (error) {
     if (error instanceof Error && error.message === 'WORKDAY_ALREADY_OPEN') {
       return NextResponse.json({ error: 'Finalize a jornada aberta antes de iniciar outra' }, { status: 409 });

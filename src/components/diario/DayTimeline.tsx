@@ -1,11 +1,12 @@
 'use client';
 
-import type { DrivingSession } from '@/lib/types';
+import type { DrivingSession, WorkActivity } from '@/lib/types';
 import { parseTimeToMinutes } from '@/lib/time';
 
 interface DayTimelineProps {
   startTime: string;
   sessions?: DrivingSession[];
+  activities?: WorkActivity[];
   /** Número de motoristas (1 = solo, 2 = equipa) — afeta o range máximo do timeline */
   numDrivers?: number;
 }
@@ -13,6 +14,7 @@ interface DayTimelineProps {
 export function DayTimeline({
   startTime,
   sessions = [],
+  activities = [],
   numDrivers = 1,
 }: DayTimelineProps) {
   const now = new Date();
@@ -30,6 +32,16 @@ export function DayTimeline({
     if (session.endTime) {
       const sEnd = parseTimeToMinutes(session.endTime);
       if (sEnd !== null) allTimes.push(sEnd);
+    }
+  }
+  for (const activity of activities) {
+    const activityStart = new Date(activity.startedAt);
+    if (!Number.isNaN(activityStart.getTime())) {
+      allTimes.push(activityStart.getHours() * 60 + activityStart.getMinutes());
+    }
+    if (activity.endedAt) {
+      const activityEnd = new Date(activity.endedAt);
+      if (!Number.isNaN(activityEnd.getTime())) allTimes.push(activityEnd.getHours() * 60 + activityEnd.getMinutes());
     }
   }
   allTimes.push(currentMinutes);
@@ -137,12 +149,22 @@ export function DayTimeline({
                   style={{ left: `${startPos}%`, width: `${Math.min(width, 100 - startPos)}%` }}
                 />
 
-                {/* Pausa entre sessões (amarela) */}
+                {/* Pausa/atividade entre sessões */}
                 {(() => {
                   if (idx >= sessions.length - 1 || !session.endTime || !sessions[idx + 1]?.startTime) return null;
                   const pauseStart = parseTimeToMinutes(session.endTime);
                   const pauseEnd = parseTimeToMinutes(sessions[idx + 1].startTime);
                   if (pauseStart === null || pauseEnd === null || pauseEnd <= pauseStart) return null;
+                  const hasWorkActivity = activities.some(activity => {
+                    const activityStartDate = new Date(activity.startedAt);
+                    const activityStart = activityStartDate.getHours() * 60 + activityStartDate.getMinutes();
+                    const activityEndDate = activity.endedAt ? new Date(activity.endedAt) : null;
+                    const activityEnd = activityEndDate
+                      ? activityEndDate.getHours() * 60 + activityEndDate.getMinutes()
+                      : currentMinutes;
+                    return activityStart < pauseEnd && activityEnd > pauseStart;
+                  });
+                  if (hasWorkActivity) return null;
                   const pausePos = getPosition(pauseStart);
                   const pauseWidth = getPosition(pauseEnd) - pausePos;
                   if (pauseWidth <= 0.3) return null;
@@ -166,6 +188,28 @@ export function DayTimeline({
           />
         ) : null}
 
+        {activities.map(activity => {
+          const activityStartDate = new Date(activity.startedAt);
+          if (Number.isNaN(activityStartDate.getTime())) return null;
+          const activityStart = activityStartDate.getHours() * 60 + activityStartDate.getMinutes();
+          const activityEndDate = activity.endedAt ? new Date(activity.endedAt) : null;
+          const activityEnd = activityEndDate
+            ? activityEndDate.getHours() * 60 + activityEndDate.getMinutes()
+            : currentMinutes;
+          const left = getPosition(activityStart);
+          const width = getPosition(activityEnd) - left;
+          if (width <= 0) return null;
+
+          return (
+            <div
+              key={activity.id}
+              title="Trabalho sem condução; não conta como pausa legal"
+              className="absolute top-2 bottom-2 z-[1] rounded bg-blue-500/80"
+              style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
+            />
+          );
+        })}
+
         {/* Marcador de tempo atual */}
         <div
           className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10"
@@ -184,6 +228,10 @@ export function DayTimeline({
         <div className="flex items-center gap-1">
           <div className="w-3 h-2 bg-amber-400 rounded" />
           <span>{isTeam ? 'Troca' : 'Pausa'}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-2 bg-blue-500 rounded" />
+          <span>Trabalho sem condução</span>
         </div>
         <div className="flex items-center gap-1">
           <div className="w-0.5 h-2 bg-red-500" />

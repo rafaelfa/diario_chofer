@@ -17,6 +17,7 @@ import { BottomNav } from '@/components/BottomNav';
 import { Toast } from '@/components/Toast';
 import { ConfirmDialog } from '@/components/diario/ConfirmDialog';
 import { PauseDialog } from '@/components/diario/PauseDialog';
+import { NonDrivingActivityDialog } from '@/components/diario/NonDrivingActivityDialog';
 import { ViewDayDialog } from '@/components/diario/ViewDayDialog';
 import { EditDayDialog } from '@/components/diario/EditDayDialog';
 import { AppHeader } from '@/components/diario/AppHeader';
@@ -46,12 +47,15 @@ export default function DiarioMotorista() {
     viewingDay, setViewingDay, editingDay, setEditingDay,
     editForm, setEditForm, deleteConfirm, setDeleteConfirm,
     showPauseDialog, setShowPauseDialog, pauseKm, setPauseKm, isProcessingPause,
+    showActivityDialog, setShowActivityDialog, activityType, setActivityType,
+    activityKm, setActivityKm, isProcessingActivity,
     breakState,
     breakMinutes,
-    conformity, workingTime,
+    conformity, workingTime, continuousTime,
     isStarting, isEnding,
     handleStartDay, handleEndDay, handleAddEvent,
     handlePauseDriving, handleResumeDriving, handleOpenPauseDialog, handleConfirmResume,
+    handleOpenNonDrivingActivity, handleConfirmNonDrivingActivity,
     handleStartBreak, handleEndBreak,
     handleOpenBreak,
     handleViewDay, handleEditClick, handleSaveEdit, handleDeleteDay,
@@ -96,6 +100,7 @@ export default function DiarioMotorista() {
             weeklyReport={weeklyReport}
             conformity={conformity}
             workingTime={workingTime}
+            continuousTime={continuousTime}
             startForm={startForm}
             setStartForm={setStartForm}
             endForm={endForm}
@@ -120,6 +125,7 @@ export default function DiarioMotorista() {
             onAddEvent={handleAddEvent}
             onResumeDriving={handleResumeDriving}
             onOpenPauseDialog={handleOpenPauseDialog}
+            onOpenNonDrivingActivity={handleOpenNonDrivingActivity}
             onLoadWorkDays={loadWorkDays}
             isStarting={isStarting}
             isEnding={isEnding}
@@ -214,6 +220,20 @@ export default function DiarioMotorista() {
           isProcessing={isProcessingPause}
           isResume={currentDay.isPaused}
           lastKnownKm={currentDay.lastSessionKm || currentDay.startKm}
+        />
+      )}
+
+      {showActivityDialog && currentDay && (
+        <NonDrivingActivityDialog
+          open={showActivityDialog}
+          mode={currentDay.activeWorkActivity ? 'finish' : 'start'}
+          activityType={currentDay.activeWorkActivity?.type ?? activityType}
+          onActivityTypeChange={setActivityType}
+          currentKm={activityKm}
+          onKmChange={setActivityKm}
+          onClose={() => setShowActivityDialog(false)}
+          onConfirm={handleConfirmNonDrivingActivity}
+          isProcessing={isProcessingActivity}
         />
       )}
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayHours, calcWorkActivityMinutes } from '@/lib/time';
 import { logError } from '@/lib/logger';
 import { formatDatePtServer } from '@/lib/timezone';
 import {
@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
       include: {
         events:          true,
         drivingSessions: { orderBy: { createdAt: 'asc' } },
+        workActivities:  { orderBy: { startedAt: 'asc' } },
       },
       orderBy: { date: 'asc' },
     });
@@ -71,6 +72,7 @@ export async function GET(request: NextRequest) {
     let totalKm    = 0;
     let totalHours = 0;
     let totalEvents = 0;
+    let totalActivityMinutes = 0;
     const alerts: string[] = [];
 
     const workDaysWithKm = workDays.map(day => {
@@ -78,10 +80,12 @@ export async function GET(request: NextRequest) {
 
       const kmTraveled  = calcKmTraveled(sessions, day.startKm, day.endKm) ?? 0;
       const hoursWorked = calcWorkDayHours(day) ?? 0;
+      const activityMinutes = calcWorkActivityMinutes(day.workActivities);
 
       totalKm     += kmTraveled;
       totalHours  += hoursWorked;
       totalEvents += day.events.length;
+      totalActivityMinutes += activityMinutes;
 
       return {
         id:           day.id,
@@ -92,6 +96,7 @@ export async function GET(request: NextRequest) {
         endCountry:   day.endCountry,
         kmTraveled:   kmTraveled ?? null,
         hoursWorked:  hoursWorked > 0 ? parseFloat(hoursWorked.toFixed(1)) : null,
+        activityMinutes,
         events:       day.events.length,
         sessionCount: sessions.length,
       };
@@ -152,6 +157,7 @@ export async function GET(request: NextRequest) {
         totalKm,
         totalHours:      parseFloat(totalHours.toFixed(1)),
         totalEvents,
+        totalActivityMinutes,
         avgHoursPerDay:  daysWorked > 0 ? parseFloat((totalHours / daysWorked).toFixed(1)) : 0,
         avgKmPerDay:     daysWorked > 0 ? Math.round(totalKm / daysWorked) : 0,
       },

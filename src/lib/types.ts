@@ -22,6 +22,20 @@ export interface WorkDayEvent {
   description: string;
 }
 
+export type WorkActivityType = 'loading' | 'unloading' | 'refueling' | 'other';
+
+export interface WorkActivity {
+  id: string;
+  workDayId: string;
+  userId: string;
+  driverNumber: 1 | 2;
+  type: WorkActivityType;
+  startedAt: string;
+  endedAt: string | null;
+  startKm: number | null;
+  endKm: number | null;
+}
+
 export interface WorkDay {
   id: string;
   date: string;
@@ -44,11 +58,17 @@ export interface WorkDay {
   breakStart?: string | null;
   breakType?: 'continuous' | 'split' | null;
   breakMinutes?: number;
+  /** Minutos de condução acumulados quando a última pausa legal terminou (base do contador 4h30) */
+  drivingMinutesAtLastBreak?: number | null;
   events: WorkDayEvent[];
   drivingSessions?: DrivingSession[];
+  workActivities?: WorkActivity[];
+  activeWorkActivity?: WorkActivity | null;
   // Campos calculados devolvidos pela API
   kmTraveled: number | null;
   hoursWorked: number | null;
+  /** Minutos em atividades sem condução (carregamento, abastecimento, ...) */
+  activityMinutes?: number;
   totalEvents: number;
   lastSessionKm?: number | null;
   sessionCount?: number;
@@ -59,6 +79,8 @@ export interface ReportStatistics {
   totalKm: number;
   totalHours: number;
   totalEvents: number;
+  /** Minutos em atividades sem condução (carregamento, abastecimento, ...) no período */
+  totalActivityMinutes?: number;
   avgHoursPerDay: number;
   avgKmPerDay: number;
 }

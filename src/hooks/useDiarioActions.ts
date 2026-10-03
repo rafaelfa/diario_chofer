@@ -21,9 +21,9 @@ import { useWorkingTime } from '@/hooks/useWorkingTime';
 import { useDayForms } from '@/hooks/useDayForms';
 import { useDialogManager } from '@/hooks/useDialogManager';
 import { useReportFilters } from '@/hooks/useReportFilters';
-import type { WorkDay, ActiveView } from '@/lib/types';
+import type { WorkActivityType, WorkDay, ActiveView } from '@/lib/types';
 import { logError } from '@/lib/logger';
-import { calcDrivingMinutes, minutesToFormatted } from '@/lib/time';
+import { calcDrivingMinutes, getRemainingBreakDebt, minutesToFormatted, resolveBreakCredit } from '@/lib/time';
 import { validateMatricula } from '@/lib/validators';
 import {
   getLocalDateString,
@@ -42,6 +42,10 @@ export interface StartFormState {
   matricula: string;
   numDrivers: number; // 1 = motorista único, 2 = equipa
   primaryDriverNumber: 1 | 2;
+  /** Como a jornada arranca: condução ou serviço (carregamento/abastecimento) */
+  startMode: 'driving' | 'service';
+  /** Tipo de atividade quando startMode = 'service' */
+  initialActivityType: WorkActivityType;
 }
 
 export interface EndFormState {
@@ -81,8 +85,10 @@ export interface BreakState {
   isActive: boolean;
   startTime: Date | null;
   type: 'none' | 'continuous' | 'split';
-  /** Acumula o total de minutos de pausas já concluídas no dia (não inclui pausa em curso) */
+  /** Acumula o total de minutos de pausas válidas já concluídas no dia (não inclui pausa em curso) */
   completedBreakMinutes: number;
+  /** Dívida atual da pausa: 45 quando ainda não houve creditação válida, 30 quando já foi credita 15m */
+  remainingBreakDebtMinutes: number;
 }
 
 export interface WorkingTimeResult {
@@ -104,7 +110,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     workDays, currentDay, isLoading,
     loadData: loadWorkDays,
     startDay, endDay, editDay, deleteDay, addEvent,
-    pauseDriving, resumeDriving, saveBreakState,
+    pauseDriving, resumeDriving, saveBreakState, changeNonDrivingActivity,
   } = workDaysActions;
 
   const {
@@ -136,6 +142,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
   const {
     calculateWorkingTime,
+    calculateContinuousTime,
     getBreakMinutes,
     getConformityStatus,
     formatTime,
@@ -166,6 +173,10 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   const [isEnding, setIsEnding] = useState(false);
   const [, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showActivityDialog, setShowActivityDialog] = useState(false);
+  const [activityType, setActivityType] = useState<WorkActivityType>('loading');
+  const [activityKm, setActivityKm] = useState('');
+  const [isProcessingActivity, setIsProcessingActivity] = useState(false);
 
   const { country: gpsCountry, loading: loadingGps, error: gpsError, getLocation } = useGeolocation();
 
@@ -383,13 +394,29 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         primaryDriverNumber: startForm.numDrivers === 2 ? startForm.primaryDriverNumber : 1,
         timezone: getClientTimezone(),
         utcOffset: getUtcOffsetString(now),
+        startMode: startForm.startMode,
+        initialActivityType: startForm.initialActivityType,
       });
 
-      setStartForm({ startCountry: '', startKm: '', lastRest: '', truckCheck: false, matricula: '', numDrivers: 1, primaryDriverNumber: 1 });
+      setStartForm({
+        startCountry: '', startKm: '', lastRest: '', truckCheck: false, matricula: '',
+        numDrivers: 1, primaryDriverNumber: 1, startMode: 'driving', initialActivityType: 'loading',
+      });
       setLastKmInfo(null);
       // Reiniciar contador de pausas acumuladas ao iniciar novo dia
-      setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: 0 });
-      showToast('Dia iniciado com sucesso!', 'success');
+      setBreakState({
+        isActive: false,
+        startTime: null,
+        type: 'none',
+        completedBreakMinutes: 0,
+        remainingBreakDebtMinutes: 45,
+      });
+      showToast(
+        startForm.startMode === 'service'
+          ? 'Dia iniciado em atividade sem condução!'
+          : 'Dia iniciado com sucesso!',
+        'success'
+      );
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Erro de conexão', 'error');
     } finally {
@@ -400,6 +427,10 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   // Finalizar dia
   const handleEndDay = async () => {
     if (!currentDay) return;
+    if (currentDay.activeWorkActivity) {
+      showToast('Finalize a atividade sem condução antes de encerrar a jornada', 'warning');
+      return;
+    }
 
     // Validate required fields
     if (!endForm.endCountry) {
@@ -422,7 +453,12 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       (currentDay.drivingSessions || []).filter(session => (session.driverNumber ?? 1) === (currentDay.primaryDriverNumber ?? 1)),
       currentDay.startTime,
       currentDay.endTime,
-      { currentTime: endTime, breakMinutes: getBreakMinutes() }
+      {
+        currentTime: endTime,
+        breakMinutes: getBreakMinutes(),
+        activities: currentDay.workActivities,
+        utcOffset: currentDay.utcOffset,
+      }
     ) ?? 0;
     const hoursWorked = totalDrivingMinutes / 60;
 
@@ -459,7 +495,14 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         breakMinutes: getBreakMinutes(),
       });
 
-      setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes: getBreakMinutes() });
+      const completedBreakMinutes = getBreakMinutes();
+      setBreakState({
+        isActive: false,
+        startTime: null,
+        type: 'none',
+        completedBreakMinutes,
+        remainingBreakDebtMinutes: getRemainingBreakDebt(completedBreakMinutes),
+      });
       setShowEndForm(false);
       setEndForm({ endCountry: '', endKm: '', observations: '' });
       showToast('Dia finalizado com sucesso!', 'success');
@@ -556,6 +599,50 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     }
   };
 
+  const handleOpenNonDrivingActivity = () => {
+    if (!currentDay) return;
+    const defaultKm = currentDay.activeWorkActivity?.startKm ?? currentDay.lastSessionKm ?? currentDay.startKm ?? 0;
+    setActivityKm(String(defaultKm));
+    setShowActivityDialog(true);
+  };
+
+  const handleConfirmNonDrivingActivity = async () => {
+    if (!currentDay) return;
+    const km = Number(activityKm);
+    if (!Number.isSafeInteger(km) || km < 0) {
+      showToast('Informe um odómetro inteiro não negativo', 'warning');
+      return;
+    }
+
+    const previousKm = currentDay.activeWorkActivity?.startKm ?? currentDay.lastSessionKm ?? currentDay.startKm;
+    if (previousKm != null && km < previousKm) {
+      showToast('O KM atual não pode ser menor que o último KM registrado', 'error');
+      return;
+    }
+
+    const isFinishingActivity = !!currentDay.activeWorkActivity;
+    setIsProcessingActivity(true);
+    try {
+      await changeNonDrivingActivity(
+        currentDay.id,
+        isFinishingActivity ? 'finish' : 'start',
+        activityKm,
+        isFinishingActivity ? undefined : activityType,
+      );
+      setShowActivityDialog(false);
+      showToast(
+        isFinishingActivity
+          ? 'Atividade encerrada. Condução retomada.'
+          : 'Condução pausada para atividade. A amplitude continua contando.',
+        'success'
+      );
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Erro ao atualizar atividade', 'error');
+    } finally {
+      setIsProcessingActivity(false);
+    }
+  };
+
   // ═══════════════════════════════════════════════════════════════════════
   //  BREAK (1 DRIVER - CLIENT-SIDE ONLY)
   // ═══════════════════════════════════════════════════════════════════════
@@ -569,19 +656,23 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     if (dbActive) {
       setBreakState(prev => {
         if (prev.isActive && prev.startTime) return prev;
+        const completedBreakMinutes = currentDay.breakMinutes ?? 0;
         return {
           isActive: true,
           startTime: new Date(currentDay.breakStart as string),
           type: currentDay.breakType as 'continuous' | 'split',
-          completedBreakMinutes: currentDay.breakMinutes ?? 0,
+          completedBreakMinutes,
+          remainingBreakDebtMinutes: getRemainingBreakDebt(completedBreakMinutes),
         };
       });
     } else {
+      const completedBreakMinutes = currentDay.breakMinutes ?? 0;
       setBreakState({
         isActive: false,
         startTime: null,
         type: 'none',
-        completedBreakMinutes: currentDay.breakMinutes ?? 0,
+        completedBreakMinutes,
+        remainingBreakDebtMinutes: getRemainingBreakDebt(completedBreakMinutes),
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -592,14 +683,28 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         showToast('Já existe uma pausa em curso. Use RETOMAR para finalizar.', 'warning');
         return prev;
       }
-      return { ...prev, isActive: true, startTime: null, type: 'none' };
+
+      const startedAt = new Date();
+      return {
+        ...prev,
+        isActive: true,
+        startTime: startedAt,
+        type: 'continuous',
+        remainingBreakDebtMinutes: getRemainingBreakDebt(prev.completedBreakMinutes),
+      };
     });
   }, [setBreakState, showToast]);
 
   // Confirms break type and starts the timer
   const handleStartBreak = useCallback(async (type: 'continuous' | 'split') => {
     const startedAt = new Date();
-    setBreakState(prev => ({ ...prev, isActive: true, startTime: startedAt, type }));
+    setBreakState(prev => ({
+      ...prev,
+      isActive: true,
+      startTime: startedAt,
+      type,
+      remainingBreakDebtMinutes: getRemainingBreakDebt(prev.completedBreakMinutes),
+    }));
     try {
       if (currentDay) {
         await saveBreakState(currentDay.id, {
@@ -615,25 +720,63 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   }, [breakState.completedBreakMinutes, currentDay, saveBreakState, setBreakState, showToast]);
 
   const handleEndBreak = useCallback(() => {
-    // Calcular duração da pausa que está a terminar
-    let breakMinutes = 0;
-    if (breakState.startTime) {
-      breakMinutes = Math.floor((Date.now() - breakState.startTime.getTime()) / 60000);
+    const breakDuration = breakState.startTime
+      ? Math.floor((Date.now() - breakState.startTime.getTime()) / 60000)
+      : 0;
+    const elapsedBreakMinutes = Math.max(breakDuration, 0);
+    const credit = resolveBreakCredit(
+      elapsedBreakMinutes,
+      breakState.remainingBreakDebtMinutes || getRemainingBreakDebt(breakState.completedBreakMinutes)
+    );
+    const nextCompletedBreakMinutes = breakState.completedBreakMinutes + credit.creditedMinutes;
+
+    let drivingMinutesAtLastBreak: number | undefined;
+    if (credit.resetContinuous && currentDay) {
+      const sessions = (currentDay.drivingSessions || []).filter(
+        session => (session.driverNumber ?? 1) === (currentDay.primaryDriverNumber ?? 1)
+      );
+      const totalDriving = calcDrivingMinutes(sessions, currentDay.startTime, currentDay.endTime, {
+        currentTime: getLocalTimeString(),
+        breakMinutes: nextCompletedBreakMinutes,
+        activities: currentDay.workActivities,
+        utcOffset: currentDay.utcOffset,
+      });
+      if (totalDriving !== null) drivingMinutesAtLastBreak = totalDriving;
     }
 
-    const completedBreakMinutes = breakState.completedBreakMinutes + Math.max(breakMinutes, 0);
-    setBreakState({ isActive: false, startTime: null, type: 'none', completedBreakMinutes });
+    setBreakState({
+      isActive: false,
+      startTime: null,
+      type: 'none',
+      completedBreakMinutes: nextCompletedBreakMinutes,
+      remainingBreakDebtMinutes: credit.remainingDebtMinutes,
+    });
+
     void (async () => {
       try {
         if (currentDay) {
-          await saveBreakState(currentDay.id, { breakStart: null, breakType: null, breakMinutes: completedBreakMinutes });
+          await saveBreakState(currentDay.id, {
+            breakStart: null,
+            breakType: null,
+            breakMinutes: nextCompletedBreakMinutes,
+            ...(drivingMinutesAtLastBreak !== undefined ? { drivingMinutesAtLastBreak } : {}),
+          });
         }
-        showToast('Condução retomada!', 'success');
+        if (credit.creditedMinutes > 0) {
+          showToast(
+            credit.resetContinuous
+              ? 'Pausa válida concluída! Condução contínua reiniciada.'
+              : 'Pausa validada: apenas o tempo preenchido foi contabilizado.',
+            'success'
+          );
+        } else {
+          showToast('Tempo insuficiente para validar pausa. Continue a condução e tente novamente.', 'warning');
+        }
       } catch {
         showToast('Não foi possível salvar o fim da pausa. Verifique a conexão.', 'error');
       }
     })();
-  }, [breakState.completedBreakMinutes, breakState.startTime, currentDay, saveBreakState, setBreakState, showToast]);
+  }, [breakState, currentDay, saveBreakState, setBreakState, showToast]);
 
   // ═══════════════════════════════════════════════════════════════════════
   //  GERENCIAMENTO (VIEW / EDIT / DELETE)
@@ -741,6 +884,8 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
   const conformity = getConformityStatus();
   const workingTime = calculateWorkingTime();
+  /** Condução contínua desde a última pausa legal (limite 4h30) */
+  const continuousTime = calculateContinuousTime();
 
   // ═══════════════════════════════════════════════════════════════════════
   //  RETURN (identical signature)
@@ -809,6 +954,13 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     pauseKm,
     setPauseKm,
     isProcessingPause,
+    showActivityDialog,
+    setShowActivityDialog,
+    activityType,
+    setActivityType,
+    activityKm,
+    setActivityKm,
+    isProcessingActivity,
 
     // --- Break (1 driver) ---
     breakState,
@@ -822,6 +974,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     // --- Computed ---
     conformity,
     workingTime,
+    continuousTime,
 
     // --- Data from hooks ---
     workDays,
@@ -836,6 +989,8 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     handleResumeDriving,
     handleOpenPauseDialog,
     handleConfirmResume,
+    handleOpenNonDrivingActivity,
+    handleConfirmNonDrivingActivity,
     handleViewDay,
     handleEditClick,
     handleSaveEdit,

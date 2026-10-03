@@ -28,7 +28,8 @@ export async function GET(
         },
         drivingSessions: {
           orderBy: { createdAt: 'asc' }
-        }
+        },
+        workActivities: { orderBy: { startedAt: 'asc' } },
       }
     });
 
@@ -58,7 +59,8 @@ export async function GET(
       hoursWorked,
       totalEvents: workDay.events.length,
       lastSessionKm,
-      sessionCount
+      sessionCount,
+      activeWorkActivity: workDay.workActivities.find(activity => !activity.endedAt) ?? null,
     });
   } catch (error) {
     // Tratar erro de autenticação
@@ -86,11 +88,17 @@ export async function PUT(
     // ✅ ISOLAMENTO: Verificar se o registro pertence ao usuário
     const existingWorkDay = await db.workDay.findFirst({
       where: { id, userId },
-      include: { drivingSessions: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        drivingSessions: { orderBy: { createdAt: 'asc' } },
+        workActivities: { orderBy: { startedAt: 'asc' } },
+      },
     });
 
     if (!existingWorkDay) {
       return NextResponse.json({ error: 'Dia não encontrado' }, { status: 404 });
+    }
+    if (body.endTime && existingWorkDay.workActivities.some(activity => !activity.endedAt)) {
+      return NextResponse.json({ error: 'Finalize a atividade sem condução antes de encerrar a jornada' }, { status: 409 });
     }
 
     // Só atualiza os campos que foram enviados no body
@@ -164,6 +172,16 @@ export async function PUT(
       if (!parsedBreakMinutes.valid) return NextResponse.json({ error: 'Minutos de pausa inválidos' }, { status: 400 });
       dataToUpdate.breakMinutes = parsedBreakMinutes.value ?? 0;
     }
+    // Base do contador de condução contínua (4h30) — só muda quando uma pausa legal termina
+    if (body.drivingMinutesAtLastBreak !== undefined) {
+      if (body.drivingMinutesAtLastBreak === null) {
+        dataToUpdate.drivingMinutesAtLastBreak = null;
+      } else {
+        const parsedBaseline = parseNonNegativeInteger(body.drivingMinutesAtLastBreak);
+        if (!parsedBaseline.valid) return NextResponse.json({ error: 'Base de condução contínua inválida' }, { status: 400 });
+        dataToUpdate.drivingMinutesAtLastBreak = parsedBaseline.value ?? 0;
+      }
+    }
 
     log('Dados a atualizar:', JSON.stringify(dataToUpdate, null, 2));
 
@@ -195,7 +213,11 @@ export async function PUT(
       return transaction.workDay.update({
         where: { id },
         data: dataToUpdate,
-        include: { events: true, drivingSessions: { orderBy: { createdAt: 'asc' } } },
+        include: {
+          events: true,
+          drivingSessions: { orderBy: { createdAt: 'asc' } },
+          workActivities: { orderBy: { startedAt: 'asc' } },
+        },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
@@ -206,7 +228,11 @@ export async function PUT(
 
     log('Registro atualizado:', JSON.stringify(workDay, null, 2));
 
-    return NextResponse.json({ ...workDay, lastSessionKm });
+    return NextResponse.json({
+      ...workDay,
+      lastSessionKm,
+      activeWorkActivity: workDay.workActivities.find(activity => !activity.endedAt) ?? null,
+    });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
       return NextResponse.json({ error: 'A jornada foi alterada simultaneamente. Atualize e tente novamente.' }, { status: 409 });

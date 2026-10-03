@@ -11,29 +11,37 @@ interface BreakTimerProps {
   /** ISO string ou Date do início da pausa */
   breakStartTime: Date | null;
   breakType: BreakType;
+  /** Minutos restantes para completar uma pausa legal de 45 minutos */
+  remainingBreakDebtMinutes?: number;
   onBreakTypeSelect: (type: 'continuous' | 'split') => void;
   onResume: () => void;
 }
 
-const CONTINUOUS_SECONDS = 45 * 60; // 45 minutos
 const SPLIT_PHASE1_SECONDS = 15 * 60; // 1ª pausa: 15 minutos
 const SPLIT_PHASE2_SECONDS = 30 * 60; // 2ª pausa: 30 minutos
 
-export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onResume }: BreakTimerProps) {
+export function BreakTimer({
+  breakStartTime,
+  breakType,
+  remainingBreakDebtMinutes = 45,
+  onBreakTypeSelect,
+  onResume,
+}: BreakTimerProps) {
   const [remaining, setRemaining] = useState(0);
   const [phase, setPhase] = useState<1 | 2>(1);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resumedEarlyRef = useRef(false);
+  const continuousTargetSeconds = Math.max(0, Math.floor(remainingBreakDebtMinutes)) * 60;
 
   const getTargetSeconds = useCallback((bt: BreakType, ph: 1 | 2) => {
-    if (bt === 'continuous') return CONTINUOUS_SECONDS;
+    if (bt === 'continuous') return continuousTargetSeconds;
     return ph === 1 ? SPLIT_PHASE1_SECONDS : SPLIT_PHASE2_SECONDS;
-  }, []);
+  }, [continuousTargetSeconds]);
 
   const getPhaseTotal = useCallback((bt: BreakType, ph: 1 | 2) => {
-    if (bt === 'continuous') return CONTINUOUS_SECONDS;
+    if (bt === 'continuous') return continuousTargetSeconds;
     return ph === 1 ? SPLIT_PHASE1_SECONDS : SPLIT_PHASE2_SECONDS;
-  }, []);
+  }, [continuousTargetSeconds]);
 
   // Cronômetro principal
   useEffect(() => {
@@ -177,7 +185,9 @@ export function BreakTimer({ breakStartTime, breakType, onBreakTypeSelect, onRes
 
         {breakType === 'continuous' && !isComplete && (
           <p className="text-[10px] sm:text-xs font-medium text-muted-foreground">
-            Pausa contínua de 45 minutos
+            {remainingBreakDebtMinutes < 45
+              ? `Faltam ${remainingBreakDebtMinutes} minutos para completar os 45 minutos legais.`
+              : 'Pausa contínua de 45 minutos'}
           </p>
         )}
 

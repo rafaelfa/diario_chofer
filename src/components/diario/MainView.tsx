@@ -444,6 +444,7 @@ export function MainView({
             <BreakTimer
               breakStartTime={breakState.startTime}
               breakType={breakState.type}
+              remainingBreakDebtMinutes={breakState.remainingBreakDebtMinutes}
               onBreakTypeSelect={onStartBreak}
               onResume={onEndBreak}
             />
@@ -560,6 +561,7 @@ export function MainView({
                 <BreakTimer
                   breakStartTime={breakState.startTime}
                   breakType={breakState.type}
+                  remainingBreakDebtMinutes={breakState.remainingBreakDebtMinutes}
                   onBreakTypeSelect={onStartBreak}
                   onResume={onEndBreak}
                 />

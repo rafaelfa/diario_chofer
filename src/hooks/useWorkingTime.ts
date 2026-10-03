@@ -18,7 +18,7 @@
 
 import { useCallback } from 'react';
 import type { WorkDay } from '@/lib/types';
-import { calcDrivingMinutes, calcContinuousDrivingMinutes, minutesToFormatted } from '@/lib/time';
+import { calcDrivingMinutes, calcContinuousDrivingMinutes, getBreakDurationMinutes, minutesToFormatted } from '@/lib/time';
 import { evaluateCurrentDailyDriving } from '@/lib/regulation561';
 import { formatDatePt, getLocalTimeString } from '@/lib/timezone';
 import type { ConformityStatus, WorkingTimeResult, BreakState } from './useDiarioActions';
@@ -33,11 +33,12 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
   /**
    * Calcula o total de minutos de pausa que devem ser subtraídos.
    * Inclui:
-   *   - Pausas já concluídas (completedBreakMinutes)
+    *   - Duração real das pausas concluídas (completedPauseMinutes)
    *   - Pausa activa em curso (se houver)
    */
   const getBreakMinutes = useCallback((): number => {
-    let total = breakState?.completedBreakMinutes ?? currentDay?.breakMinutes ?? 0;
+    let total = breakState?.completedPauseMinutes
+      ?? getBreakDurationMinutes(currentDay?.breakPeriods, currentDay?.breakMinutes, currentDay?.breakStart, now ?? new Date());
 
     if (breakState?.isActive && breakState.startTime && now) {
       const elapsed = Math.floor((now.getTime() - breakState.startTime.getTime()) / 60000);
@@ -45,7 +46,7 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
     }
 
     return Math.max(total, 0);
-  }, [breakState, currentDay?.breakMinutes, now]);
+  }, [breakState, currentDay?.breakMinutes, currentDay?.breakPeriods, currentDay?.breakStart, now]);
 
   const calculateWorkingTime = useCallback((): WorkingTimeResult => {
     if (!currentDay?.startTime) return { hours: 0, minutes: 0, formatted: '0:00', totalMinutes: 0 };

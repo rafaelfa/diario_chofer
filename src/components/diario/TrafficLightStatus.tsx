@@ -68,7 +68,7 @@ export function TrafficLightStatus({
             <div className="flex items-center gap-1 mt-1.5">
               <Coffee className="h-3 w-3 text-blue-500" />
               <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-                Pausas: {breakFormatted} <span className="text-muted-foreground font-normal">(não contam para condução)</span>
+                Pausas legais: {breakFormatted} <span className="text-muted-foreground font-normal">(crédito máximo de 45min por pausa)</span>
               </span>
             </div>
           )}

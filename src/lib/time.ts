@@ -284,6 +284,48 @@ export function getTotalBreakMinutes(
   return completed + activeMinutes;
 }
 
+interface BreakPeriodDuration {
+  startedAt: Date | string;
+  endedAt?: Date | string | null;
+}
+
+export function getCompletedBreakDurationMinutes(
+  periods: BreakPeriodDuration[] | null | undefined,
+  creditedMinutes: number | null | undefined
+): number {
+  const credited = Number.isFinite(creditedMinutes) ? Math.max(0, creditedMinutes ?? 0) : 0;
+  if (!periods?.length) return credited;
+
+  const recordedDuration = periods.reduce((total, period) => {
+    if (!period.endedAt) return total;
+    const start = new Date(period.startedAt).getTime();
+    const end = new Date(period.endedAt).getTime();
+    if (Number.isNaN(start) || Number.isNaN(end)) return total;
+    return total + Math.max(0, Math.floor((end - start) / 60000));
+  }, 0);
+
+  return Math.max(recordedDuration, credited);
+}
+
+export function getBreakDurationMinutes(
+  periods: BreakPeriodDuration[] | null | undefined,
+  creditedMinutes: number | null | undefined,
+  activeBreakStart?: Date | string | null,
+  now: Date = new Date()
+): number {
+  if (!periods?.length) return getTotalBreakMinutes(creditedMinutes, activeBreakStart, now);
+
+  const recordedDuration = periods.reduce((total, period) => {
+    const start = new Date(period.startedAt).getTime();
+    const end = period.endedAt ? new Date(period.endedAt).getTime() : now.getTime();
+    if (Number.isNaN(start) || Number.isNaN(end)) return total;
+    return total + Math.max(0, Math.floor((end - start) / 60000));
+  }, 0);
+  const credited = Number.isFinite(creditedMinutes) ? Math.max(0, creditedMinutes ?? 0) : 0;
+
+  return Math.max(recordedDuration, credited);
+}
+
 export function getRemainingBreakDebt(completedBreakMinutes: number | null | undefined): number {
   const completed = Number.isFinite(completedBreakMinutes) ? Math.max(0, completedBreakMinutes ?? 0) : 0;
   if (completed >= 45) return 45;
@@ -317,6 +359,15 @@ export function resolveBreakCredit(
   return { creditedMinutes: 0, remainingDebtMinutes: normalizedDebt || 45, resetContinuous: false };
 }
 
+export function getCreditedBreakMinutes(
+  completedCreditedMinutes: number,
+  activeBreakElapsedMinutes: number,
+  remainingDebtMinutes: number
+): number {
+  const completed = Number.isFinite(completedCreditedMinutes) ? Math.max(0, completedCreditedMinutes) : 0;
+  return completed + resolveBreakCredit(activeBreakElapsedMinutes, remainingDebtMinutes).creditedMinutes;
+}
+
 interface WorkDayDrivingTimeInput {
   startTime?: string | null;
   endTime?: string | null;
@@ -324,6 +375,7 @@ interface WorkDayDrivingTimeInput {
   primaryDriverNumber?: number | null;
   breakMinutes?: number | null;
   breakStart?: Date | string | null;
+  breakPeriods?: BreakPeriodDuration[];
   workActivities?: Array<{ startedAt: string | Date; endedAt?: string | Date | null }>;
   drivingSessions?: Array<{
     startTime?: string | null;
@@ -346,7 +398,7 @@ export function calcWorkDayDrivingMinutes(
 
   return calcDrivingMinutes(sessions, workDay.startTime, workDay.endTime, {
     currentTime: getTimeAtUtcOffset(now, activeSession?.utcOffset ?? workDay.utcOffset),
-    breakMinutes: getTotalBreakMinutes(workDay.breakMinutes, workDay.breakStart, now),
+    breakMinutes: getBreakDurationMinutes(workDay.breakPeriods, workDay.breakMinutes, workDay.breakStart, now),
     activities: workDay.workActivities,
     utcOffset: workDay.utcOffset,
   });

@@ -23,7 +23,7 @@ import { useDialogManager } from '@/hooks/useDialogManager';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import type { WorkActivityType, WorkDay, ActiveView } from '@/lib/types';
 import { logError } from '@/lib/logger';
-import { calcDrivingMinutes, calcWorkDayDrivingMinutes, getRemainingBreakDebt, minutesToFormatted, resolveBreakCredit } from '@/lib/time';
+import { calcDrivingMinutes, calcWorkDayDrivingMinutes, getCompletedBreakDurationMinutes, getCreditedBreakMinutes, getRemainingBreakDebt, minutesToFormatted, resolveBreakCredit } from '@/lib/time';
 import { aggregateDrivingByDate, countWeeklyDailyDrivingExceptions, getMonday } from '@/lib/regulation561';
 import { validateMatricula } from '@/lib/validators';
 import {
@@ -91,6 +91,8 @@ export interface BreakState {
   type: 'none' | 'continuous' | 'split';
   /** Acumula o total de minutos de pausas válidas já concluídas no dia (não inclui pausa em curso) */
   completedBreakMinutes: number;
+  /** Duração real das pausas concluídas, inclusive o tempo acima do crédito legal */
+  completedPauseMinutes: number;
   /** Dívida atual da pausa: 45 quando ainda não houve creditação válida, 30 quando já foi credita 15m */
   remainingBreakDebtMinutes: number;
 }
@@ -452,6 +454,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         startTime: null,
         type: 'none',
         completedBreakMinutes: 0,
+        completedPauseMinutes: 0,
         remainingBreakDebtMinutes: 45,
       });
       showToast(
@@ -543,16 +546,17 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         observations: endForm.observations,
         breakStart: null,
         breakType: null,
-        breakMinutes: getBreakMinutes(),
+        breakMinutes: breakState.completedBreakMinutes,
       });
 
-      const completedBreakMinutes = getBreakMinutes();
+      const completedPauseMinutes = getBreakMinutes();
       setBreakState({
         isActive: false,
         startTime: null,
         type: 'none',
-        completedBreakMinutes,
-        remainingBreakDebtMinutes: getRemainingBreakDebt(completedBreakMinutes),
+        completedBreakMinutes: breakState.completedBreakMinutes,
+        completedPauseMinutes,
+        remainingBreakDebtMinutes: getRemainingBreakDebt(breakState.completedBreakMinutes),
       });
       setShowEndForm(false);
       setEndForm({ endCountry: '', endKm: '', observations: '' });
@@ -674,21 +678,25 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       setBreakState(prev => {
         if (prev.isActive && prev.startTime) return prev;
         const completedBreakMinutes = currentDay.breakMinutes ?? 0;
+        const completedPauseMinutes = getCompletedBreakDurationMinutes(currentDay.breakPeriods, completedBreakMinutes);
         return {
           isActive: true,
           startTime: new Date(currentDay.breakStart as string),
           type: currentDay.breakType as 'continuous' | 'split',
           completedBreakMinutes,
+          completedPauseMinutes,
           remainingBreakDebtMinutes: getRemainingBreakDebt(completedBreakMinutes),
         };
       });
     } else {
       const completedBreakMinutes = currentDay.breakMinutes ?? 0;
+      const completedPauseMinutes = getCompletedBreakDurationMinutes(currentDay.breakPeriods, completedBreakMinutes);
       setBreakState({
         isActive: false,
         startTime: null,
         type: 'none',
         completedBreakMinutes,
+        completedPauseMinutes,
         remainingBreakDebtMinutes: getRemainingBreakDebt(completedBreakMinutes),
       });
     }
@@ -754,6 +762,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       breakState.remainingBreakDebtMinutes || getRemainingBreakDebt(breakState.completedBreakMinutes)
     );
     const nextCompletedBreakMinutes = breakState.completedBreakMinutes + credit.creditedMinutes;
+    const nextCompletedPauseMinutes = breakState.completedPauseMinutes + elapsedBreakMinutes;
 
     let drivingMinutesAtLastBreak: number | undefined;
     if (credit.resetContinuous && currentDay) {
@@ -762,7 +771,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       );
       const totalDriving = calcDrivingMinutes(sessions, currentDay.startTime, currentDay.endTime, {
         currentTime: getLocalTimeString(),
-        breakMinutes: nextCompletedBreakMinutes,
+        breakMinutes: nextCompletedPauseMinutes,
         activities: currentDay.workActivities,
         utcOffset: currentDay.utcOffset,
       });
@@ -774,6 +783,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
       startTime: null,
       type: 'none',
       completedBreakMinutes: nextCompletedBreakMinutes,
+      completedPauseMinutes: nextCompletedPauseMinutes,
       remainingBreakDebtMinutes: credit.remainingDebtMinutes,
     });
 
@@ -910,6 +920,13 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
 
   /** Condução contínua desde a última pausa legal (limite 4h30) */
   const continuousTime = calculateContinuousTime();
+  const displayedBreakCreditMinutes = getCreditedBreakMinutes(
+    breakState.completedBreakMinutes,
+    breakState.isActive && breakState.startTime && clockNow
+      ? Math.max(0, Math.floor((clockNow.getTime() - breakState.startTime.getTime()) / 60000))
+      : 0,
+    breakState.remainingBreakDebtMinutes
+  );
 
   // ═══════════════════════════════════════════════════════════════════════
   //  RETURN (identical signature)
@@ -989,7 +1006,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     handleStartBreak,
     handleEndBreak,
     /** Total de minutos de pausa (concluídas + em curso) — v4.1.5 */
-    breakMinutes: getBreakMinutes(),
+    breakMinutes: displayedBreakCreditMinutes,
 
     // --- Computed ---
     conformity,

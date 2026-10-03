@@ -47,6 +47,7 @@ export async function POST(
         include: {
           drivingSessions: { orderBy: { createdAt: 'asc' } },
           workActivities: { orderBy: { startedAt: 'asc' } },
+          breakPeriods: { orderBy: { startedAt: 'asc' } },
         },
       });
 
@@ -113,6 +114,7 @@ export async function POST(
           events: { orderBy: { time: 'asc' } },
           drivingSessions: { orderBy: { createdAt: 'asc' } },
           workActivities: { orderBy: { startedAt: 'asc' } },
+          breakPeriods: { orderBy: { startedAt: 'asc' } },
         },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });

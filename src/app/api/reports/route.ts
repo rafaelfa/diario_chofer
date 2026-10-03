@@ -65,6 +65,7 @@ export async function GET(request: NextRequest) {
         events:          true,
         drivingSessions: { orderBy: { createdAt: 'asc' } },
         workActivities:  { orderBy: { startedAt: 'asc' } },
+        breakPeriods:    { orderBy: { startedAt: 'asc' } },
       },
       orderBy: { date: 'asc' },
     });
@@ -124,6 +125,7 @@ export async function GET(request: NextRequest) {
           utcOffset: true,
           breakMinutes: true,
           breakStart: true,
+          breakPeriods: { select: { startedAt: true, endedAt: true } },
           drivingSessions: { orderBy: { createdAt: 'asc' } },
         },
       });

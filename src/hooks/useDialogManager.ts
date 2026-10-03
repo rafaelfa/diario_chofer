@@ -43,6 +43,7 @@ export function useDialogManager() {
     startTime: null,
     type: 'none',
     completedBreakMinutes: 0,
+    completedPauseMinutes: 0,
     remainingBreakDebtMinutes: 45,
   });
 

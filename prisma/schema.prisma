@@ -55,7 +55,7 @@ model WorkDay {
   updatedAt     DateTime         @updatedAt @map("updated_at")
   breakStart    DateTime?        @map("break_start") // Início da pausa em curso (persistida — sobrevive a refresh)
   breakType     String?          @map("break_type") // 'continuous' | 'split' | null
-  breakMinutes  Int              @default(0) @map("break_minutes") // Total de minutos de pausas concluídas no dia
+  breakMinutes  Int              @default(0) @map("break_minutes") // Minutos de pausa creditados para a regra legal
   // Minutos de condução no momento em que a última pausa LEGAL terminou.
   // Base do contador de condução contínua (4h30 — Reg. CE 561/2006, Art. 5º).
   // Atividades sem condução (carregamento/abastecimento) nunca alteram esta base.

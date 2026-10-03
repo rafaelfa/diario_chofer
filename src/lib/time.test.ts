@@ -8,6 +8,8 @@ import {
   calcKmTraveled,
   calcWorkDayDrivingMinutes,
   calcWorkActivityMinutes,
+  getCreditedBreakMinutes,
+  getBreakDurationMinutes,
   calcWorkDayHours,
   diffInMinutes,
   getTimeAtUtcOffset,
@@ -84,6 +86,34 @@ test('calcWorkDayDrivingMinutes preserves the exact minute above nine hours', ()
   }, new Date('2026-09-28T17:01:00.000Z'));
 
   assert.equal(minutes, 541);
+});
+
+test('driving time excludes a 60-minute break while legal credit remains 45 minutes', () => {
+  const now = new Date('2026-09-28T14:00:00.000Z');
+  const breakPeriods = [{
+    startedAt: '2026-09-28T12:30:00.000Z',
+    endedAt: '2026-09-28T13:30:00.000Z',
+  }];
+  const drivingMinutes = calcWorkDayDrivingMinutes({
+    startTime: '08:00',
+    endTime: '14:00',
+    breakMinutes: 45,
+    breakPeriods,
+    drivingSessions: [{ startTime: '08:00', endTime: '14:00', status: 'ended', driverNumber: 1 }],
+  }, now);
+
+  assert.equal(getBreakDurationMinutes(breakPeriods, 45, null, now), 60);
+  assert.equal(drivingMinutes, 300);
+  assert.equal(
+    getBreakDurationMinutes([{ startedAt: breakPeriods[0].startedAt, endedAt: null }], 0, null, now),
+    90
+  );
+});
+
+test('legal pause display is capped at the remaining break credit', () => {
+  assert.equal(getCreditedBreakMinutes(0, 60, 45), 45);
+  assert.equal(getCreditedBreakMinutes(15, 35, 30), 45);
+  assert.equal(getCreditedBreakMinutes(15, 29, 30), 15);
 });
 
 test('non-driving work activity stays in amplitude but not driving time', () => {

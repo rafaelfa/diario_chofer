@@ -58,7 +58,8 @@ export async function GET(request: NextRequest) {
         events: true,
         drivingSessions: {
           orderBy: { createdAt: 'asc' }
-        }
+        },
+        breakPeriods: { orderBy: { startedAt: 'asc' } },
       },
       orderBy: { date: 'desc' }
     });

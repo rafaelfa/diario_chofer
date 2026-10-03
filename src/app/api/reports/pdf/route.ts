@@ -20,7 +20,7 @@ import {
 import { endOfUtcDay, isValidTimezone, parseDateOnlyUtc, startOfUtcDay } from '@/lib/validators';
 
 type ReportWorkDay = Prisma.WorkDayGetPayload<{
-  include: { events: true; drivingSessions: true; workActivities: true };
+  include: { events: true; drivingSessions: true; workActivities: true; breakPeriods: true };
 }>;
 
 interface ReportHtmlData {
@@ -112,7 +112,8 @@ export async function GET(request: NextRequest) {
           },
           workActivities: {
             orderBy: { startedAt: 'asc' }
-          }
+          },
+          breakPeriods: { orderBy: { startedAt: 'asc' } },
         },
         orderBy: { createdAt: 'asc' }
       });
@@ -183,7 +184,8 @@ export async function GET(request: NextRequest) {
           },
           workActivities: {
             orderBy: { startedAt: 'asc' }
-          }
+          },
+          breakPeriods: { orderBy: { startedAt: 'asc' } },
         },
         orderBy: { date: 'asc' }
       });
@@ -209,7 +211,8 @@ export async function GET(request: NextRequest) {
           },
           workActivities: {
             orderBy: { startedAt: 'asc' }
-          }
+          },
+          breakPeriods: { orderBy: { startedAt: 'asc' } },
         },
         orderBy: { date: 'asc' }
       });
@@ -233,7 +236,8 @@ export async function GET(request: NextRequest) {
           },
           workActivities: {
             orderBy: { startedAt: 'asc' }
-          }
+          },
+          breakPeriods: { orderBy: { startedAt: 'asc' } },
         },
         orderBy: { date: 'asc' }
       });
@@ -320,6 +324,7 @@ export async function GET(request: NextRequest) {
             utcOffset: true,
             breakMinutes: true,
             breakStart: true,
+            breakPeriods: { select: { startedAt: true, endedAt: true } },
             drivingSessions: { orderBy: { createdAt: 'asc' } },
           },
         });

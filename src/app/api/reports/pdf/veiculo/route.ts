@@ -9,7 +9,7 @@ import { escapeHtml } from '@/lib/html';
 import { endOfUtcDay, isValidTimezone, parseDateOnlyUtc, startOfUtcDay, validateMatricula } from '@/lib/validators';
 
 type VehicleReportWorkDay = Prisma.WorkDayGetPayload<{
-  include: { events: true; drivingSessions: true; workActivities: true };
+  include: { events: true; drivingSessions: true; workActivities: true; breakPeriods: true };
 }>;
 
 interface VehicleReportHtmlData {
@@ -113,7 +113,8 @@ export async function GET(request: NextRequest) {
           },
           workActivities: {
             orderBy: { startedAt: 'asc' }
-          }
+          },
+          breakPeriods: { orderBy: { startedAt: 'asc' } },
         },
         orderBy: { createdAt: 'asc' }
       });
@@ -131,7 +132,8 @@ export async function GET(request: NextRequest) {
           },
           workActivities: {
             orderBy: { startedAt: 'asc' }
-          }
+          },
+          breakPeriods: { orderBy: { startedAt: 'asc' } },
         },
         orderBy: { createdAt: 'asc' }
       });

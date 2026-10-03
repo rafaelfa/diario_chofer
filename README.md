@@ -17,7 +17,7 @@ Aplicacao web responsiva para registrar jornadas de motoristas, sessoes de condu
 ## Recursos
 
 - Cadastro e login com senha hash, sessao JWT em cookie HTTP-only e isolamento de dados por usuario.
-- Abertura e encerramento de jornadas com data, horarios, paises, matricula, verificacao do veiculo, odometro e observacoes.
+- Abertura e encerramento de jornadas com data, horarios, paises, matricula, verificacao do veiculo, odometro e observacoes. O odometro e informado no inicio e no fim do dia; pausas, retomadas e atividades sem conducao nao pedem leituras intermediarias. A distancia diaria usa a diferenca entre os dois registros.
 - Jornadas com um ou dois motoristas, identificacao do motorista principal e alternancia de sessoes na troca de condutor.
 - Pausas continuas ou divididas para jornadas individuais; o inicio e o total concluido ficam persistidos no banco.
 - Atividades sem conducao — carregamento, descarregamento, abastecimento e outro trabalho — que interrompem a sessao de conducao sem interromper a amplitude da jornada.
@@ -25,7 +25,8 @@ Aplicacao web responsiva para registrar jornadas de motoristas, sessoes de condu
 - Inicio de jornada em conducao ou em servico: no modo servico a jornada abre com a atividade em curso e sem sessao de conducao ativa.
 - Eventos vinculados a uma jornada, como abastecimento, fronteiras e anotacoes.
 - Historico de jornadas, consulta do ultimo odometro por matricula, estatisticas por veiculo e relatorios semanais, mensais, por periodo e para impressao em PDF.
-- Alertas auxiliares de conducao diaria, semanal e em duas semanas, considerando sessoes e pausas registradas.
+- Limite diario de conducao de 9h, com extensao ate 10h em no maximo dois dias por semana ISO. O diario mostra o uso das extensoes (`0/2`, `1/2` ou `2/2`), distingue a extensao permitida do excesso e os relatorios sinalizam quando o limite semanal e ultrapassado.
+- Alertas auxiliares de conducao semanal e em duas semanas, considerando sessoes e pausas registradas.
 - Interface instalavel como PWA. Offline, o sistema mostra uma pagina de indisponibilidade, mas nao grava nem sincroniza alteracoes.
 
 ## Arquitetura
@@ -167,7 +168,7 @@ O repositorio esta conectado ao deploy da Vercel pela branch `main`; push nessa 
 - `JWT_SECRET`: segredo aleatorio forte, igual para as instancias do mesmo ambiente.
 - `NEXT_PUBLIC_APP_URL`: URL publica da aplicacao, se usada pela configuracao do ambiente.
 
-O build executa `next build` e copia os recursos para `output: standalone`. Ele **nao aplica migrations automaticamente**. Atualize e valide o banco Neon antes de colocar em producao codigo que depende de novas colunas ou tabelas. Nunca coloque credenciais de producao no repositorio, README, logs ou prompts.
+O script `npm run build` executa `prisma migrate deploy`, depois `next build` e prepara os arquivos para `output: standalone`. Portanto, o deploy da Vercel tenta aplicar migrations pendentes usando `DATABASE_URL` do ambiente de build. Em banco existente, confira o schema e o historico `_prisma_migrations` antes do deploy, principalmente se alguma alteracao foi aplicada manualmente pelo SQL Editor do Neon: SQL manual nao registra a migration. Nunca marque migrations como aplicadas sem comparar o schema real. Nunca coloque credenciais de producao no repositorio, README, logs ou prompts.
 
 ## API
 
@@ -194,7 +195,7 @@ Todas as rotas de dados exigem sessao autenticada; o middleware/Proxy libera ape
 
 ## Testes
 
-`npm test` cobre parsing de `HH:MM`, passagem da meia-noite, duracao de sessoes, odometros, pausas, separacao entre conducao e atividades de trabalho (com sessoes e janelas que cruzam a meia-noite), contador de conducao continua de 4h30, selecao de motorista, semanas ISO, limites diarios/semanal/quinzenal e formatacao em fusos negativos. Antes de publicar, rode `npm test`, `npm run lint`, `npx tsc --noEmit` e `npm run build`.
+`npm test` cobre parsing de `HH:MM`, passagem da meia-noite, duracao de sessoes, odometros, pausas, separacao entre conducao e atividades de trabalho (com sessoes e janelas que cruzam a meia-noite), contador de conducao continua de 4h30, selecao de motorista, semanas ISO, as duas extensoes diarias de 10h, limites semanal/quinzenal e formatacao em fusos negativos. Antes de publicar, rode `npm test`, `npm run lint`, `npx tsc --noEmit` e `npm run build`.
 
 ## Limites conhecidos
 

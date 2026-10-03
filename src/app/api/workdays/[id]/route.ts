@@ -6,6 +6,12 @@ import { calcKmTraveled, calcWorkDayHours } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
 import { isValidTimeString, parseNonNegativeInteger, validateMatricula } from '@/lib/validators';
 
+function isMissingBreakPeriodsTable(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError
+    && error.code === 'P2021'
+    && String(error.meta?.table ?? '').includes('break_periods');
+}
+
 // GET - Buscar dia de trabalho por ID (apenas se pertencer ao usuário)
 export async function GET(
   request: NextRequest,
@@ -34,10 +40,7 @@ export async function GET(
         include: includeWithBreakPeriods,
       });
     } catch (error) {
-      const missingBreakPeriodsTable = error instanceof Prisma.PrismaClientKnownRequestError
-        && error.code === 'P2021'
-        && String(error.meta?.table ?? '').includes('break_periods');
-      if (!missingBreakPeriodsTable) throw error;
+      if (!isMissingBreakPeriodsTable(error)) throw error;
 
       log('Tabela break_periods ainda não existe; carregando jornada sem histórico de pausas.');
       const dayWithoutBreakPeriods = await db.workDay.findFirst({
@@ -210,7 +213,7 @@ export async function PUT(
 
     log('Dados a atualizar:', JSON.stringify(dataToUpdate, null, 2));
 
-    const workDay = await db.$transaction(async transaction => {
+    const updateWorkDay = (includeBreakPeriods: boolean) => db.$transaction(async transaction => {
       const sessions = existingWorkDay.drivingSessions;
       const firstSession = sessions[0];
       const lastSession = sessions[sessions.length - 1];
@@ -235,14 +238,14 @@ export async function PUT(
         });
       }
 
-      if (parsedBreakStart) {
+      if (includeBreakPeriods && parsedBreakStart) {
         const breakType = body.breakType === 'split' ? 'split' : 'continuous';
         await transaction.breakPeriod.upsert({
           where: { workDayId_startedAt: { workDayId: id, startedAt: parsedBreakStart } },
           create: { workDayId: id, userId, startedAt: parsedBreakStart, type: breakType },
           update: { type: breakType },
         });
-      } else if (body.breakStart === null || body.breakStart === '') {
+      } else if (includeBreakPeriods && (body.breakStart === null || body.breakStart === '')) {
         await transaction.breakPeriod.updateMany({
           where: { workDayId: id, userId, endedAt: null },
           data: { endedAt: parsedBreakEndedAt ?? new Date() },
@@ -256,10 +259,19 @@ export async function PUT(
           events: true,
           drivingSessions: { orderBy: { createdAt: 'asc' } },
           workActivities: { orderBy: { startedAt: 'asc' } },
-          breakPeriods: { orderBy: { startedAt: 'asc' } },
+          ...(includeBreakPeriods ? { breakPeriods: { orderBy: { startedAt: 'asc' as const } } } : {}),
         },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    let workDay: Awaited<ReturnType<typeof updateWorkDay>>;
+    try {
+      workDay = await updateWorkDay(true);
+    } catch (error) {
+      if (!isMissingBreakPeriodsTable(error)) throw error;
+      log('Tabela break_periods ainda não existe; salvando o estado da pausa sem histórico detalhado.');
+      workDay = await updateWorkDay(false);
+    }
 
     // Calcular lastSessionKm (campo calculado, não existe no schema Prisma)
     const allSessions = workDay.drivingSessions || [];

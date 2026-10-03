@@ -28,7 +28,9 @@ export function CircularTimeCounter({
       if (hoursValue >= 4) return { ring: '#f59e0b', bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600' };
       return { ring: '#10b981', bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600' };
     } else {
-      // Para dia: verde até 8h, amarelo 8h-9h, vermelho >9h
+      // A extensao permitida fica em amarelo; vermelho indica que o limite aplicavel foi excedido.
+      if (maxHours >= 10 && hoursValue > 10) return { ring: '#ef4444', bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600' };
+      if (maxHours >= 10 && hoursValue >= 9) return { ring: '#f59e0b', bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600' };
       if (hoursValue >= 9) return { ring: '#ef4444', bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600' };
       if (hoursValue >= 8) return { ring: '#f59e0b', bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600' };
       return { ring: '#10b981', bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600' };
@@ -40,11 +42,16 @@ export function CircularTimeCounter({
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (percentage / 100) * circumference;
-  const shouldPulse = (maxHours === 4.5 && totalMinutes / 60 >= 4) || (maxHours === 9 && totalMinutes / 60 >= 8);
+  const shouldPulse = (maxHours === 4.5 && totalMinutes / 60 >= 4)
+    || (maxHours >= 10 && totalMinutes / 60 >= 9)
+    || (maxHours < 10 && maxHours !== 4.5 && totalMinutes / 60 >= 8);
 
   return (
-    <div className={`relative inline-flex items-center justify-center ${shouldPulse ? 'animate-pulse' : ''}`}>
-      <svg width={size} height={size} className="transform -rotate-90">
+    <div
+      className={`relative inline-flex shrink-0 items-center justify-center ${shouldPulse ? 'animate-pulse' : ''}`}
+      style={{ width: size, height: size }}
+    >
+      <svg width={size} height={size} className="block -rotate-90">
         {/* Background circle */}
         <circle
           cx={size / 2}
@@ -70,10 +77,10 @@ export function CircularTimeCounter({
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold font-mono">
+        <span className="text-xl font-bold font-mono sm:text-2xl">
           {hours}:{minutes.toString().padStart(2, '0')}
         </span>
-        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className="max-w-full px-1 text-center text-[11px] leading-tight text-muted-foreground">{label}</span>
       </div>
     </div>
   );

@@ -465,8 +465,8 @@ export function MainView({
               'from-emerald-50 to-white dark:from-emerald-950 dark:to-slate-900'
             }`}>
               <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div>
+                <div className="grid grid-cols-[minmax(0,1fr)_6.25rem] items-center gap-3">
+                  <div className="min-w-0">
                     <Badge className={`${
                       conformity.status === 'danger' ? 'bg-red-600' :
                       conformity.status === 'warning' ? 'bg-amber-600' :
@@ -475,7 +475,7 @@ export function MainView({
                       <Activity className={`h-3 w-3 mr-1 ${conformity.status !== 'ok' ? 'animate-pulse' : ''}`} />
                       DIA EM ANDAMENTO
                     </Badge>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="secondary" className="text-xs">
                         <Users className="h-3 w-3 mr-1" />
                         {currentDay.numDrivers === 2 ? '2 Motoristas' : '1 Motorista'}
@@ -487,13 +487,13 @@ export function MainView({
                         Extensões 10h: {conformity.dailyExtensionsUsed ?? 0}/2 usadas
                       </Badge>
                     </div>
-                    <CardTitle>{formatDate(currentDay.date)}</CardTitle>
+                    <CardTitle className="mt-1 break-words leading-tight">{formatDate(currentDay.date)}</CardTitle>
                   </div>
                   <CircularTimeCounter
                     hours={workingTime.hours}
                     minutes={workingTime.minutes}
                     maxHours={conformity.maxHours ?? 9}
-                    label="de trabalho"
+                    label="condução"
                     size={100}
                   />
                 </div>
@@ -511,20 +511,20 @@ export function MainView({
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-3 mb-4">
-                  <div className="text-center p-3 bg-white/70 dark:bg-slate-800/70 rounded-xl shadow-sm">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-4">
+                  <div className="min-w-0 text-center p-2 sm:p-3 bg-white/70 dark:bg-slate-800/70 rounded-xl shadow-sm">
                     <Clock className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
-                    <p className="text-lg font-bold">{formatTime(currentDay.startTime)}</p>
+                    <p className="text-base sm:text-lg font-bold">{formatTime(currentDay.startTime)}</p>
                     <p className="text-xs text-muted-foreground">Início</p>
                   </div>
-                  <div className="text-center p-3 bg-white/70 dark:bg-slate-800/70 rounded-xl shadow-sm">
+                  <div className="min-w-0 text-center p-2 sm:p-3 bg-white/70 dark:bg-slate-800/70 rounded-xl shadow-sm">
                     <MapPin className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
-                    <p className="text-lg font-bold">{currentDay.startCountry || '--'}</p>
+                    <p className="break-words text-sm sm:text-lg font-bold">{currentDay.startCountry || '--'}</p>
                     <p className="text-xs text-muted-foreground">Local</p>
                   </div>
-                  <div className="text-center p-3 bg-white/70 dark:bg-slate-800/70 rounded-xl shadow-sm">
+                  <div className="min-w-0 text-center p-2 sm:p-3 bg-white/70 dark:bg-slate-800/70 rounded-xl shadow-sm">
                     <Gauge className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
-                    <p className="text-lg font-bold">{currentDay.startKm?.toLocaleString() || '--'}</p>
+                    <p className="break-words text-sm sm:text-lg font-bold">{currentDay.startKm?.toLocaleString() || '--'}</p>
                     <p className="text-xs text-muted-foreground">KM</p>
                   </div>
                 </div>
@@ -610,24 +610,24 @@ export function MainView({
               </Card>
             ) : (
               /* PAUSAR + EVENTO buttons for ALL drivers */
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 {currentDay.numDrivers === 2 ? (
-                  <Button onClick={onOpenPauseDialog} variant="outline" className="h-14 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700 text-base font-medium">
-                    <Pause className="h-5 w-5 mr-2" />
+                  <Button onClick={onOpenPauseDialog} variant="outline" className="h-14 min-w-0 px-2 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700 text-xs sm:text-sm font-medium">
+                    <Pause className="h-4 w-4 shrink-0 mr-1" />
                     PAUSAR
                   </Button>
                 ) : (
-                  <Button onClick={onOpenBreak} variant="outline" className="h-14 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700 text-base font-medium">
-                    <Pause className="h-5 w-5 mr-2" />
+                  <Button onClick={onOpenBreak} variant="outline" className="h-14 min-w-0 px-2 border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700 text-xs sm:text-sm font-medium">
+                    <Pause className="h-4 w-4 shrink-0 mr-1" />
                     PAUSAR
                   </Button>
                 )}
-                <Button onClick={onOpenNonDrivingActivity} variant="outline" className="h-14 border-blue-400 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700 text-xs sm:text-sm font-medium">
-                  <BriefcaseBusiness className="h-5 w-5 mr-1" />
+                <Button onClick={onOpenNonDrivingActivity} variant="outline" className="h-14 min-w-0 px-2 border-blue-400 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700 text-xs sm:text-sm font-medium">
+                  <BriefcaseBusiness className="h-4 w-4 shrink-0 mr-1" />
                   SERVIÇO
                 </Button>
-                <Button onClick={() => setShowEventInput(true)} variant="outline" className="h-14 border-blue-400 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700 text-base font-medium">
-                  <Plus className="h-5 w-5 mr-2" />
+                <Button onClick={() => setShowEventInput(true)} variant="outline" className="h-14 min-w-0 px-2 border-blue-400 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700 text-xs sm:text-sm font-medium">
+                  <Plus className="h-4 w-4 shrink-0 mr-1" />
                   EVENTO
                 </Button>
               </div>
@@ -648,11 +648,11 @@ export function MainView({
                 {currentDay.events.length > 0 && (
                   <div className="space-y-2 mb-4">
                     {currentDay.events.map((event) => (
-                      <div key={event.id} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
+                      <div key={event.id} className="flex min-w-0 items-start gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
                         <span className="text-xs font-mono text-muted-foreground bg-white dark:bg-slate-700 px-2 py-1 rounded-lg">
                           {event.time}
                         </span>
-                        <span className="text-sm flex-1">{event.description}</span>
+                        <span className="min-w-0 flex-1 break-words text-sm">{event.description}</span>
                       </div>
                     ))}
                   </div>
@@ -693,7 +693,7 @@ export function MainView({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label className="text-xs flex items-center gap-1">
                         País de Fim

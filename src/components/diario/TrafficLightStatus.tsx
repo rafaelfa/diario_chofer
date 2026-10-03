@@ -6,6 +6,7 @@ interface TrafficLightStatusProps {
   status: 'ok' | 'warning' | 'danger';
   totalMinutes: number;
   maxHours?: number;
+  message?: string;
   /** Total de minutos de pausa realizados (Reg. CE 561/2006 — pausas não contam para condução) */
   breakMinutes?: number;
 }
@@ -14,6 +15,7 @@ export function TrafficLightStatus({
   status,
   totalMinutes,
   maxHours = 9,
+  message,
   breakMinutes = 0,
 }: TrafficLightStatusProps) {
   const hours = Math.floor(totalMinutes / 60);
@@ -74,13 +76,13 @@ export function TrafficLightStatus({
           {isDanger && (
             <p className="text-xs text-red-600 font-medium mt-1 flex items-center gap-1">
               <AlertTriangle className="h-3 w-3" />
-              LIMITE EXCEDIDO - Faça uma pausa imediatamente!
+              {message || 'Limite diário excedido.'}
             </p>
           )}
           {isAlert && !isDanger && (
             <p className="text-xs text-amber-600 font-medium mt-1 flex items-center gap-1">
               <AlertTriangle className="h-3 w-3" />
-              Próximo do limite - Considere fazer uma pausa
+              {message || 'Próximo do limite diário.'}
             </p>
           )}
         </div>

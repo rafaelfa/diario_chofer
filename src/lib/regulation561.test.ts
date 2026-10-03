@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { aggregateDrivingByDate, computeDrivingLimits, evaluateDailyDrivingLimits, getIsoWeekNumberUtc, getMonday } from './regulation561.ts';
+import { aggregateDrivingByDate, computeDrivingLimits, countWeeklyDailyDrivingExceptions, evaluateCurrentDailyDriving, evaluateDailyDrivingLimits, getIsoWeekNumberUtc, getMonday } from './regulation561.ts';
 
 test('getMonday returns the UTC Monday for a date in the week', () => {
   assert.equal(getMonday(new Date('2026-09-30T23:00:00.000Z')).toISOString(), '2026-09-28T00:00:00.000Z');
@@ -51,4 +51,25 @@ test('daily driving limits allow two 10-hour exceptions and reject later ones', 
   })));
   assert.equal(result.overAbsoluteLimit.length, 0);
   assert.deepEqual(result.exceededWeeklyExceptions.map(day => day.date.toISOString().slice(0, 10)), ['2026-09-30']);
+});
+
+test('weekly exception count uses exact thresholds and ISO week boundaries', () => {
+  const result = countWeeklyDailyDrivingExceptions([
+    { date: '2026-09-27', hours: 10 },
+    { date: '2026-09-28', hours: 9 },
+    { date: '2026-09-29', hours: 541 / 60 },
+    { date: '2026-09-30', hours: 10 },
+    { date: '2026-10-01', hours: 601 / 60 },
+    { date: '2026-10-05', hours: 10 },
+  ], new Date('2026-09-30T12:00:00.000Z'));
+
+  assert.equal(result, 2);
+});
+
+test('live daily driving status respects the two extensions and absolute 10-hour cap', () => {
+  assert.equal(evaluateCurrentDailyDriving(540, 0).status, 'warning');
+  assert.equal(evaluateCurrentDailyDriving(541, 0).extensionNumber, 1);
+  assert.equal(evaluateCurrentDailyDriving(541, 1).extensionNumber, 2);
+  assert.equal(evaluateCurrentDailyDriving(541, 2).reason, 'exceptions-exhausted');
+  assert.equal(evaluateCurrentDailyDriving(601, 0).reason, 'absolute-limit');
 });

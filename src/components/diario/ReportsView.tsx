@@ -254,6 +254,26 @@ export function ReportsView({
                   <span>Condução diária máxima</span>
                   <Badge>9h (10h 2x/semana)</Badge>
                 </div>
+                {weeklyReport?.period.type === 'weekly' && weeklyReport.dailyExtensionsUsed != null && (
+                  <>
+                    <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                      <span>Extensões de 10h nesta semana</span>
+                      <Badge
+                        variant={weeklyReport.dailyExtensionsUsed > 2 ? 'destructive' : 'outline'}
+                        className={weeklyReport.dailyExtensionsUsed === 2 ? 'border-amber-500 text-amber-700' : ''}
+                      >
+                        {weeklyReport.dailyExtensionsUsed}/2
+                      </Badge>
+                    </div>
+                    {weeklyReport.dailyExtensionsUsed >= 2 && (
+                      <p className={`text-xs ${weeklyReport.dailyExtensionsUsed > 2 ? 'text-red-600' : 'text-amber-700'}`}>
+                        {weeklyReport.dailyExtensionsUsed > 2
+                          ? 'O limite semanal de extensões foi excedido.'
+                          : 'As duas extensões já foram usadas; o limite das próximas jornadas é 9h.'}
+                      </p>
+                    )}
+                  </>
+                )}
                 <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
                   <span>Condução semanal máxima</span>
                   <Badge>56h</Badge>

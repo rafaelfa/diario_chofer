@@ -317,23 +317,25 @@ export function resolveBreakCredit(
   return { creditedMinutes: 0, remainingDebtMinutes: normalizedDebt || 45, resetContinuous: false };
 }
 
-export function calcWorkDayHours(
-  workDay: {
+interface WorkDayDrivingTimeInput {
+  startTime?: string | null;
+  endTime?: string | null;
+  utcOffset?: string | null;
+  primaryDriverNumber?: number | null;
+  breakMinutes?: number | null;
+  breakStart?: Date | string | null;
+  workActivities?: Array<{ startedAt: string | Date; endedAt?: string | Date | null }>;
+  drivingSessions?: Array<{
     startTime?: string | null;
     endTime?: string | null;
+    status?: string;
+    driverNumber?: number | null;
     utcOffset?: string | null;
-    primaryDriverNumber?: number | null;
-    breakMinutes?: number | null;
-    breakStart?: Date | string | null;
-    workActivities?: Array<{ startedAt: string | Date; endedAt?: string | Date | null }>;
-    drivingSessions?: Array<{
-      startTime?: string | null;
-      endTime?: string | null;
-      status?: string;
-      driverNumber?: number | null;
-      utcOffset?: string | null;
-    }>;
-  },
+  }>;
+}
+
+export function calcWorkDayDrivingMinutes(
+  workDay: WorkDayDrivingTimeInput,
   now: Date = new Date(),
   driverNumber: number | null = workDay.primaryDriverNumber ?? 1
 ): number | null {
@@ -342,10 +344,19 @@ export function calcWorkDayHours(
   );
   const activeSession = sessions.find(session => session.status === 'active' && !session.endTime);
 
-  return calcHoursWorked(sessions, workDay.startTime, workDay.endTime, {
+  return calcDrivingMinutes(sessions, workDay.startTime, workDay.endTime, {
     currentTime: getTimeAtUtcOffset(now, activeSession?.utcOffset ?? workDay.utcOffset),
     breakMinutes: getTotalBreakMinutes(workDay.breakMinutes, workDay.breakStart, now),
     activities: workDay.workActivities,
     utcOffset: workDay.utcOffset,
   });
+}
+
+export function calcWorkDayHours(
+  workDay: WorkDayDrivingTimeInput,
+  now: Date = new Date(),
+  driverNumber: number | null = workDay.primaryDriverNumber ?? 1
+): number | null {
+  const drivingMinutes = calcWorkDayDrivingMinutes(workDay, now, driverNumber);
+  return drivingMinutes === null ? null : parseFloat((drivingMinutes / 60).toFixed(2));
 }

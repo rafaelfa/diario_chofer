@@ -23,7 +23,8 @@ import { useDialogManager } from '@/hooks/useDialogManager';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import type { WorkActivityType, WorkDay, ActiveView } from '@/lib/types';
 import { logError } from '@/lib/logger';
-import { calcDrivingMinutes, getRemainingBreakDebt, minutesToFormatted, resolveBreakCredit } from '@/lib/time';
+import { calcDrivingMinutes, calcWorkDayDrivingMinutes, getRemainingBreakDebt, minutesToFormatted, resolveBreakCredit } from '@/lib/time';
+import { aggregateDrivingByDate, countWeeklyDailyDrivingExceptions, getMonday } from '@/lib/regulation561';
 import { validateMatricula } from '@/lib/validators';
 import {
   getLocalDateString,
@@ -79,6 +80,9 @@ export interface ConfirmDialogState {
 export interface ConformityStatus {
   status: 'ok' | 'warning' | 'danger';
   message: string;
+  maxHours?: number;
+  dailyExtensionsUsed?: number;
+  dailyExtensionsUsedBeforeToday?: number;
 }
 
 export interface BreakState {
@@ -147,6 +151,44 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     formatTime,
     formatDate,
   } = useWorkingTime(currentDay, breakState, clockNow);
+
+  const workingTime = calculateWorkingTime();
+  const limitsNow = clockNow ?? new Date();
+  const currentDateKey = currentDay?.date.slice(0, 10) ?? getLocalDateString(limitsNow);
+  const weekReferenceDate = new Date(`${currentDateKey}T00:00:00.000Z`);
+  const weekStartKey = getMonday(weekReferenceDate).toISOString().slice(0, 10);
+  const nextWeekDate = new Date(`${weekStartKey}T00:00:00.000Z`);
+  nextWeekDate.setUTCDate(nextWeekDate.getUTCDate() + 7);
+  const nextWeekKey = nextWeekDate.toISOString().slice(0, 10);
+  const currentWeekWorkDays = workDays.filter(day => {
+    const dayKey = day.date.slice(0, 10);
+    return dayKey >= weekStartKey && dayKey < nextWeekKey;
+  });
+  const dailyDrivingTotals = aggregateDrivingByDate([
+    ...currentWeekWorkDays.map(day => ({
+      date: day.date,
+      hoursWorked: (day.id === currentDay?.id
+        ? workingTime.totalMinutes
+        : calcWorkDayDrivingMinutes(day, limitsNow) ?? 0) / 60,
+    })),
+    ...(currentDay && !currentWeekWorkDays.some(day => day.id === currentDay.id)
+      ? [{ date: currentDay.date, hoursWorked: workingTime.totalMinutes / 60 }]
+      : []),
+  ]);
+  const exceptionsUsedBeforeToday = countWeeklyDailyDrivingExceptions(
+    dailyDrivingTotals.filter(day => day.date.toISOString().slice(0, 10) < currentDateKey),
+    weekReferenceDate
+  );
+  const dailyExtensionsUsed = countWeeklyDailyDrivingExceptions(dailyDrivingTotals, weekReferenceDate);
+  const currentDateDailyMinutes = Math.round(
+    (dailyDrivingTotals.find(day => day.date.toISOString().slice(0, 10) === currentDateKey)?.hours
+      ?? workingTime.totalMinutes / 60) * 60
+  );
+  const conformity = {
+    ...getConformityStatus(exceptionsUsedBeforeToday, currentDateDailyMinutes),
+    dailyExtensionsUsed,
+    dailyExtensionsUsedBeforeToday: exceptionsUsedBeforeToday,
+  };
 
   const {
     startForm, setStartForm,
@@ -462,13 +504,20 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
         utcOffset: currentDay.utcOffset,
       }
     ) ?? 0;
-    const hoursWorked = totalDrivingMinutes / 60;
-
-    if (hoursWorked > 9) {
+    const previousSameDateMinutes = Math.max(0, currentDateDailyMinutes - workingTime.totalMinutes);
+    const dailyDrivingMinutesAtClose = previousSameDateMinutes + totalDrivingMinutes;
+    if (dailyDrivingMinutesAtClose > 9 * 60) {
+      const description = dailyDrivingMinutesAtClose > 10 * 60
+        ? `Você conduziu ${minutesToFormatted(dailyDrivingMinutesAtClose)}, acima do limite absoluto de 10h diárias.`
+        : exceptionsUsedBeforeToday >= 2
+          ? `Você conduziu ${minutesToFormatted(dailyDrivingMinutesAtClose)} e já usou as duas extensões semanais. O limite diário de 9h foi ultrapassado.`
+          : `Você conduziu ${minutesToFormatted(dailyDrivingMinutesAtClose)}. Esta será a extensão ${exceptionsUsedBeforeToday + 1}/2 da semana, dentro do máximo de 10h.`;
       setConfirmDialog({
         open: true,
-        title: 'Atenção: Limite de horas excedido',
-        description: `Você conduziu ${minutesToFormatted(totalDrivingMinutes)}, o que excede o limite de 9h do Reg. CE 561/2006. Deseja finalizar mesmo assim?`,
+        title: dailyDrivingMinutesAtClose > 10 * 60 || exceptionsUsedBeforeToday >= 2
+          ? 'Atenção: limite diário excedido'
+          : 'Extensão diária de condução',
+        description: `${description} Deseja finalizar mesmo assim?`,
         onConfirm: () => {
           setConfirmDialog(null);
           proceedWithEndDay();
@@ -850,8 +899,6 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   //  COMPUTED
   // ═══════════════════════════════════════════════════════════════════════
 
-  const conformity = getConformityStatus();
-  const workingTime = calculateWorkingTime();
   /** Condução contínua desde a última pausa legal (limite 4h30) */
   const continuousTime = calculateContinuousTime();
 

@@ -59,6 +59,47 @@ export function aggregateDrivingByDate(
   return [...totals.values()].sort((a, b) => a.date.getTime() - b.date.getTime());
 }
 
+export function countWeeklyDailyDrivingExceptions(
+  days: Array<{ date: string | Date; hours: number }>,
+  referenceDate: Date
+): number {
+  const weekStart = getMonday(referenceDate).toISOString().slice(0, 10);
+  const nextWeekStart = new Date(`${weekStart}T00:00:00.000Z`);
+  nextWeekStart.setUTCDate(nextWeekStart.getUTCDate() + 7);
+  const nextWeekKey = nextWeekStart.toISOString().slice(0, 10);
+
+  return days.filter(day => {
+    const key = dateKey(day.date);
+    return key >= weekStart && key < nextWeekKey
+      && day.hours > MAX_DAILY_DRIVING_H
+      && day.hours <= MAX_DAILY_DRIVING_EXCEPTION_H;
+  }).length;
+}
+
+export function evaluateCurrentDailyDriving(minutes: number, exceptionsUsedBeforeToday: number) {
+  if (minutes > MAX_DAILY_DRIVING_EXCEPTION_H * 60) {
+    return { status: 'danger' as const, maxHours: MAX_DAILY_DRIVING_EXCEPTION_H, reason: 'absolute-limit' as const };
+  }
+
+  if (minutes > MAX_DAILY_DRIVING_H * 60) {
+    if (exceptionsUsedBeforeToday >= 2) {
+      return { status: 'danger' as const, maxHours: MAX_DAILY_DRIVING_H, reason: 'exceptions-exhausted' as const };
+    }
+    return {
+      status: 'warning' as const,
+      maxHours: MAX_DAILY_DRIVING_EXCEPTION_H,
+      reason: 'extension' as const,
+      extensionNumber: exceptionsUsedBeforeToday + 1,
+    };
+  }
+
+  if (minutes > 8 * 60) {
+    return { status: 'warning' as const, maxHours: MAX_DAILY_DRIVING_H, reason: 'approaching' as const };
+  }
+
+  return { status: 'ok' as const, maxHours: MAX_DAILY_DRIVING_H, reason: 'within-limit' as const };
+}
+
 export function evaluateDailyDrivingLimits(days: Array<{ date: Date; hours: number }>) {
   const overAbsoluteLimit = days.filter(day => day.hours > MAX_DAILY_DRIVING_EXCEPTION_H);
   const exceptionsByWeek = new Map<string, Array<{ date: Date; hours: number }>>();

@@ -6,6 +6,7 @@ import {
   calcDrivingMinutes,
   calcHoursWorked,
   calcKmTraveled,
+  calcWorkDayDrivingMinutes,
   calcWorkActivityMinutes,
   calcWorkDayHours,
   diffInMinutes,
@@ -73,6 +74,16 @@ test('calcWorkDayHours follows the selected primary driver', () => {
   const now = new Date('2026-09-28T12:00:00.000Z');
   assert.equal(calcWorkDayHours(workDay, now), 3);
   assert.equal(calcWorkDayHours(workDay, now, null), 4);
+});
+
+test('calcWorkDayDrivingMinutes preserves the exact minute above nine hours', () => {
+  const minutes = calcWorkDayDrivingMinutes({
+    startTime: '08:00',
+    endTime: '17:01',
+    drivingSessions: [{ startTime: '08:00', endTime: '17:01', status: 'ended', driverNumber: 1 }],
+  }, new Date('2026-09-28T17:01:00.000Z'));
+
+  assert.equal(minutes, 541);
 });
 
 test('non-driving work activity stays in amplitude but not driving time', () => {

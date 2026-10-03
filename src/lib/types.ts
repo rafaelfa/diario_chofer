@@ -92,6 +92,7 @@ export interface Report {
   statistics: ReportStatistics;
   alerts: string[];
   drivingLimits?: DrivingLimitResult | null;
+  dailyExtensionsUsed?: number | null;
   workDays?: WorkDay[];
 }
 

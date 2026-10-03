@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { requireAuth } from '@/lib/auth';
-import { calcKmTraveled, calcWorkDayHours, calcWorkActivityMinutes, formatDecimalHours } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayDrivingMinutes, calcWorkDayHours, calcWorkActivityMinutes, formatDecimalHours } from '@/lib/time';
 import { log, logError } from '@/lib/logger';
 import { formatDatePtServer } from '@/lib/timezone';
 import { escapeHtml } from '@/lib/html';
 import {
   aggregateDrivingByDate,
   computeDrivingLimits,
+  countWeeklyDailyDrivingExceptions,
   evaluateDailyDrivingLimits,
   getIsoWeekNumberUtc,
   getMonday,
@@ -290,9 +291,15 @@ export async function GET(request: NextRequest) {
     const alerts: string[] = [];
     if (!matricula) {
       const dailyTotals = aggregateDrivingByDate(workDays.flatMap(day =>
-        day.date ? [{ date: day.date, hoursWorked: calcWorkDayHours(day) ?? 0 }] : []
+        day.date ? [{ date: day.date, hoursWorked: (calcWorkDayDrivingMinutes(day) ?? 0) / 60 }] : []
       ));
       const dailyLimits = evaluateDailyDrivingLimits(dailyTotals);
+      const dailyExtensionsUsed = countWeeklyDailyDrivingExceptions(dailyTotals, referenceDate);
+      if (type === 'weekly' && dailyExtensionsUsed >= 2) {
+        alerts.push(dailyExtensionsUsed === 2
+          ? 'As duas extensões semanais de 10h já foram utilizadas (2/2).'
+          : `${dailyExtensionsUsed}/2 extensões semanais de 10h utilizadas; o limite foi excedido.`);
+      }
       for (const excess of dailyLimits.overAbsoluteLimit) {
         alerts.push(`${formatDatePtServer(excess.date, timezone)}: ${excess.hours.toFixed(1)}h de condução (limite absoluto: ${MAX_DAILY_DRIVING_EXCEPTION_H}h)`);
       }

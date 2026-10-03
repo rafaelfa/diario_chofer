@@ -480,13 +480,19 @@ export function MainView({
                         <Users className="h-3 w-3 mr-1" />
                         {currentDay.numDrivers === 2 ? '2 Motoristas' : '1 Motorista'}
                       </Badge>
+                      <Badge
+                        variant={(conformity.dailyExtensionsUsed ?? 0) > 2 ? 'destructive' : 'outline'}
+                        className={`text-xs ${(conformity.dailyExtensionsUsed ?? 0) === 2 ? 'border-amber-500 text-amber-700' : ''}`}
+                      >
+                        Extensões 10h: {conformity.dailyExtensionsUsed ?? 0}/2 usadas
+                      </Badge>
                     </div>
                     <CardTitle>{formatDate(currentDay.date)}</CardTitle>
                   </div>
                   <CircularTimeCounter
                     hours={workingTime.hours}
                     minutes={workingTime.minutes}
-                    maxHours={9}
+                    maxHours={conformity.maxHours ?? 9}
                     label="de trabalho"
                     size={100}
                   />
@@ -526,7 +532,8 @@ export function MainView({
                 <TrafficLightStatus
                   status={conformity.status}
                   totalMinutes={workingTime.totalMinutes}
-                  maxHours={9}
+                  maxHours={conformity.maxHours ?? 9}
+                  message={conformity.message}
                   breakMinutes={breakMinutes}
                 />
 

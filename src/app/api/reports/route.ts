@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { calcKmTraveled, calcWorkDayHours, calcWorkActivityMinutes } from '@/lib/time';
+import { calcKmTraveled, calcWorkDayDrivingMinutes, calcWorkDayHours, calcWorkActivityMinutes } from '@/lib/time';
 import { logError } from '@/lib/logger';
 import { formatDatePtServer } from '@/lib/timezone';
 import {
   aggregateDrivingByDate,
   computeDrivingLimits,
+  countWeeklyDailyDrivingExceptions,
   evaluateDailyDrivingLimits,
   getMonday,
   MAX_BIWEEKLY_DRIVING_H,
@@ -103,10 +104,14 @@ export async function GET(request: NextRequest) {
     });
 
     let drivingLimits: ReturnType<typeof computeDrivingLimits> | null = null;
+    let dailyExtensionsUsed: number | null = null;
     if (type === 'weekly') {
-      const dailyTotals = aggregateDrivingByDate(workDaysWithKm
+      const dailyTotals = aggregateDrivingByDate(workDays
         .filter(day => day.date !== null)
-        .map(day => ({ date: day.date as Date, hoursWorked: day.hoursWorked ?? 0 })));
+        .map(day => ({
+          date: day.date as Date,
+          hoursWorked: (calcWorkDayDrivingMinutes(day) ?? 0) / 60,
+        })));
       const previousWeekStart = new Date(startDate);
       previousWeekStart.setUTCDate(previousWeekStart.getUTCDate() - 7);
       const complianceDays = await db.workDay.findMany({
@@ -138,6 +143,7 @@ export async function GET(request: NextRequest) {
       }
 
       const dailyLimits = evaluateDailyDrivingLimits(dailyTotals);
+      dailyExtensionsUsed = countWeeklyDailyDrivingExceptions(dailyTotals, referenceDate);
       for (const excess of dailyLimits.overAbsoluteLimit) {
         alerts.push(`Dia ${formatDatePtServer(excess.date, timezone)}: ${excess.hours.toFixed(1)}h (limite absoluto: 10h)`);
       }
@@ -163,6 +169,7 @@ export async function GET(request: NextRequest) {
       },
       alerts,
       drivingLimits,
+      dailyExtensionsUsed,
       workDays: workDaysWithKm,
     });
   } catch (error) {

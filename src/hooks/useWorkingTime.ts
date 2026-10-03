@@ -19,6 +19,7 @@
 import { useCallback } from 'react';
 import type { WorkDay } from '@/lib/types';
 import { calcDrivingMinutes, calcContinuousDrivingMinutes, minutesToFormatted } from '@/lib/time';
+import { evaluateCurrentDailyDriving } from '@/lib/regulation561';
 import { formatDatePt, getLocalTimeString } from '@/lib/timezone';
 import type { ConformityStatus, WorkingTimeResult, BreakState } from './useDiarioActions';
 
@@ -91,30 +92,34 @@ export function useWorkingTime(currentDay: WorkDay | null, breakState?: BreakSta
     };
   }, [calculateWorkingTime, currentDay?.drivingMinutesAtLastBreak]);
 
-  const getConformityStatus = useCallback((): ConformityStatus => {
-    if (!currentDay?.startTime) return { status: 'ok', message: '' };
+  const getConformityStatus = useCallback((weeklyExceptionsUsedBeforeToday = 0, dailyDrivingMinutes?: number): ConformityStatus => {
+    if (!currentDay?.startTime) {
+      return { status: 'ok', message: '', maxHours: 9, dailyExtensionsUsedBeforeToday: weeklyExceptionsUsedBeforeToday };
+    }
 
     const total = calculateWorkingTime();
-    const totalHours = total.totalMinutes / 60;
     const breakMinutes = getBreakMinutes();
+    const drivingMinutes = dailyDrivingMinutes ?? total.totalMinutes;
+    const drivingFormatted = minutesToFormatted(drivingMinutes);
+    const dailyStatus = evaluateCurrentDailyDriving(drivingMinutes, weeklyExceptionsUsedBeforeToday);
+    const pauseSummary = breakMinutes > 0 ? ` — Pausas: ${minutesToFormatted(breakMinutes)}` : '';
 
-    if (totalHours > 9) {
-      return {
-        status: 'danger',
-        message: `LIMITE DIÁRIO: ${total.formatted} de condução (máx 9h) — Pausas: ${minutesToFormatted(breakMinutes)}`
-      };
-    } else if (totalHours > 8) {
-      return {
-        status: 'warning',
-        message: `${total.formatted} de condução — Aproximando do limite (pausas: ${minutesToFormatted(breakMinutes)})`
-      };
-    }
+    const message = dailyStatus.reason === 'absolute-limit'
+      ? `Limite absoluto de 10h excedido: ${drivingFormatted} de condução.`
+      : dailyStatus.reason === 'exceptions-exhausted'
+        ? `As duas extensões semanais já foram usadas. O limite diário de 9h foi ultrapassado (${drivingFormatted}).`
+        : dailyStatus.reason === 'extension'
+          ? `Extensão legal ${dailyStatus.extensionNumber}/2 em uso: ${drivingFormatted} de condução (máximo de 10h hoje).`
+          : dailyStatus.reason === 'approaching'
+            ? `${drivingFormatted} de condução — próximo do limite diário de 9h.`
+            : `${drivingFormatted} de condução — dentro do limite diário de 9h.`;
 
-    if (breakMinutes > 0) {
-      return { status: 'ok', message: `${total.formatted} de condução — Pausas: ${minutesToFormatted(breakMinutes)}` };
-    }
-
-    return { status: 'ok', message: `${total.formatted} de condução — OK` };
+    return {
+      status: dailyStatus.status,
+      message: `${message}${pauseSummary}`,
+      maxHours: dailyStatus.maxHours,
+      dailyExtensionsUsedBeforeToday: weeklyExceptionsUsedBeforeToday,
+    };
   }, [currentDay, calculateWorkingTime, getBreakMinutes]);
 
   return {

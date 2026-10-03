@@ -694,23 +694,30 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDay?.id, currentDay?.breakStart, currentDay?.breakType]);
- const handleOpenBreak = useCallback(() => {
-    setBreakState(prev => {
-      if (prev.isActive && prev.startTime) {
-        showToast('Já existe uma pausa em curso. Use RETOMAR para finalizar.', 'warning');
-        return prev;
-      }
+  const handleOpenBreak = useCallback(() => {
+    if (breakState.isActive && breakState.startTime) {
+      showToast('Já existe uma pausa em curso. Use RETOMAR para finalizar.', 'warning');
+      return;
+    }
 
-      const startedAt = new Date();
-      return {
-        ...prev,
-        isActive: true,
-        startTime: startedAt,
-        type: 'continuous',
-        remainingBreakDebtMinutes: getRemainingBreakDebt(prev.completedBreakMinutes),
-      };
+    const startedAt = new Date();
+    const type = 'continuous';
+    setBreakState({
+      ...breakState,
+      isActive: true,
+      startTime: startedAt,
+      type,
+      remainingBreakDebtMinutes: getRemainingBreakDebt(breakState.completedBreakMinutes),
     });
-  }, [setBreakState, showToast]);
+
+    if (currentDay) {
+      void saveBreakState(currentDay.id, {
+        breakStart: startedAt.toISOString(),
+        breakType: type,
+        breakMinutes: breakState.completedBreakMinutes,
+      }).catch(() => showToast('Não foi possível salvar o início da pausa.', 'error'));
+    }
+  }, [breakState, currentDay, saveBreakState, setBreakState, showToast]);
 
   // Confirms break type and starts the timer
   const handleStartBreak = useCallback(async (type: 'continuous' | 'split') => {
@@ -737,8 +744,9 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
   }, [breakState.completedBreakMinutes, currentDay, saveBreakState, setBreakState, showToast]);
 
   const handleEndBreak = useCallback(() => {
+    const endedAt = new Date();
     const breakDuration = breakState.startTime
-      ? Math.floor((Date.now() - breakState.startTime.getTime()) / 60000)
+      ? Math.floor((endedAt.getTime() - breakState.startTime.getTime()) / 60000)
       : 0;
     const elapsedBreakMinutes = Math.max(breakDuration, 0);
     const credit = resolveBreakCredit(
@@ -776,6 +784,7 @@ export function useDiarioActions(workDaysActions: WorkDaysActions, reportsAction
             breakStart: null,
             breakType: null,
             breakMinutes: nextCompletedBreakMinutes,
+            breakEndedAt: endedAt.toISOString(),
             ...(drivingMinutesAtLastBreak !== undefined ? { drivingMinutesAtLastBreak } : {}),
           });
         }

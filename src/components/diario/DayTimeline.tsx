@@ -1,12 +1,14 @@
 'use client';
 
-import type { DrivingSession, WorkActivity } from '@/lib/types';
+import type { BreakPeriod, DrivingSession, WorkActivity } from '@/lib/types';
 import { parseTimeToMinutes } from '@/lib/time';
 
 interface DayTimelineProps {
   startTime: string;
   sessions?: DrivingSession[];
   activities?: WorkActivity[];
+  breakPeriods?: BreakPeriod[];
+  activeBreakStart?: Date | null;
   /** Número de motoristas (1 = solo, 2 = equipa) — afeta o range máximo do timeline */
   numDrivers?: number;
 }
@@ -15,12 +17,35 @@ export function DayTimeline({
   startTime,
   sessions = [],
   activities = [],
+  breakPeriods = [],
+  activeBreakStart = null,
   numDrivers = 1,
 }: DayTimelineProps) {
   const now = new Date();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
   const startMinutes = parseTimeToMinutes(startTime) ?? 0;
+  const breakIntervals = breakPeriods.map(period => {
+    const startedAt = new Date(period.startedAt);
+    const endedAt = period.endedAt ? new Date(period.endedAt) : null;
+    return {
+      key: period.id,
+      startedAt,
+      endedAt,
+      startMinutes: startedAt.getHours() * 60 + startedAt.getMinutes(),
+      endMinutes: endedAt ? endedAt.getHours() * 60 + endedAt.getMinutes() : currentMinutes,
+    };
+  }).filter(period => !Number.isNaN(period.startedAt.getTime()));
+
+  if (activeBreakStart && !breakIntervals.some(period => period.startedAt.getTime() === activeBreakStart.getTime())) {
+    breakIntervals.push({
+      key: `active-${activeBreakStart.getTime()}`,
+      startedAt: activeBreakStart,
+      endedAt: null,
+      startMinutes: activeBreakStart.getHours() * 60 + activeBreakStart.getMinutes(),
+      endMinutes: currentMinutes,
+    });
+  }
 
   // Build list of all significant times from sessions + start time
   const allTimes: number[] = [];
@@ -43,6 +68,9 @@ export function DayTimeline({
       const activityEnd = new Date(activity.endedAt);
       if (!Number.isNaN(activityEnd.getTime())) allTimes.push(activityEnd.getHours() * 60 + activityEnd.getMinutes());
     }
+  }
+  for (const period of breakIntervals) {
+    allTimes.push(period.startMinutes, period.endMinutes);
   }
   allTimes.push(currentMinutes);
 
@@ -187,6 +215,24 @@ export function DayTimeline({
             }}
           />
         ) : null}
+
+        {breakIntervals.map(period => {
+          const endMinutes = period.endMinutes < period.startMinutes
+            ? period.endMinutes + 24 * 60
+            : period.endMinutes;
+          const left = getPosition(period.startMinutes);
+          const width = getPosition(endMinutes) - left;
+          if (width <= 0) return null;
+
+          return (
+            <div
+              key={period.key}
+              title="Pausa"
+              className="absolute top-2 bottom-2 z-[1] rounded bg-amber-400/80"
+              style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
+            />
+          );
+        })}
 
         {activities.map(activity => {
           const activityStartDate = new Date(activity.startedAt);

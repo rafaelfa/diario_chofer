@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
         events:          { orderBy: { time: 'asc' } },
         drivingSessions: { orderBy: { createdAt: 'asc' } },
         workActivities:  { orderBy: { startedAt: 'asc' } },
+        breakPeriods:    { orderBy: { startedAt: 'asc' } },
       },
       orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
     });
@@ -194,7 +195,7 @@ export async function POST(request: NextRequest) {
                 },
               }),
         },
-        include: { events: true, drivingSessions: true, workActivities: true },
+        include: { events: true, drivingSessions: true, workActivities: true, breakPeriods: true },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 

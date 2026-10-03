@@ -24,6 +24,7 @@ model AppUser {
   events           Event[]
   drivingSessions  DrivingSession[]
   workActivities   WorkActivity[]
+  breakPeriods     BreakPeriod[]
   settings         Settings?
 
   @@map("app_users")
@@ -65,6 +66,7 @@ model WorkDay {
   events           Event[]
   drivingSessions  DrivingSession[]
   workActivities   WorkActivity[]
+  breakPeriods     BreakPeriod[]
 
   @@index([userId])       // Índice para filtro por usuário
   @@index([matricula])    // Índice para busca por matrícula
@@ -135,6 +137,24 @@ model WorkActivity {
   @@index([userId])
   @@index([workDayId, endedAt])
   @@map("work_activities")
+}
+
+model BreakPeriod {
+  id        String    @id @default(cuid())
+  workDayId String    @map("work_day_id")
+  userId    String    @map("user_id")
+  type      String    @default("continuous")
+  startedAt DateTime  @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  workDay WorkDay @relation(fields: [workDayId], references: [id], onDelete: Cascade)
+  user    AppUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workDayId, startedAt])
+  @@index([userId])
+  @@index([workDayId, startedAt])
+  @@map("break_periods")
 }
 
 // Configurações do usuário

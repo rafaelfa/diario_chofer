@@ -548,6 +548,8 @@ export function MainView({
                     startTime={currentDay.startTime}
                     sessions={currentDay.drivingSessions}
                     activities={currentDay.workActivities}
+                    breakPeriods={currentDay.breakPeriods}
+                    activeBreakStart={breakState.startTime ?? (currentDay.breakStart ? new Date(currentDay.breakStart) : null)}
                     numDrivers={currentDay.numDrivers}
                   />
                 </div>

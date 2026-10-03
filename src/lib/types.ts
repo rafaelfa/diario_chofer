@@ -36,6 +36,15 @@ export interface WorkActivity {
   endKm: number | null;
 }
 
+export interface BreakPeriod {
+  id: string;
+  workDayId: string;
+  userId: string;
+  type: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+
 export interface WorkDay {
   id: string;
   date: string;
@@ -63,6 +72,7 @@ export interface WorkDay {
   events: WorkDayEvent[];
   drivingSessions?: DrivingSession[];
   workActivities?: WorkActivity[];
+  breakPeriods?: BreakPeriod[];
   activeWorkActivity?: WorkActivity | null;
   // Campos calculados devolvidos pela API
   kmTraveled: number | null;

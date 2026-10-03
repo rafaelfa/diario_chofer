@@ -190,6 +190,7 @@ export function useWorkDays() {
         breakStart: string | null;
         breakType: string | null;
         breakMinutes: number;
+        breakEndedAt?: string;
         /** Base do contador 4h30 — enviada só quando a pausa legal foi cumprida */
         drivingMinutesAtLastBreak?: number;
       }

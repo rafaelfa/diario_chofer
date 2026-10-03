@@ -30,6 +30,7 @@ export async function GET(
           orderBy: { createdAt: 'asc' }
         },
         workActivities: { orderBy: { startedAt: 'asc' } },
+        breakPeriods: { orderBy: { startedAt: 'asc' } },
       }
     });
 
@@ -159,10 +160,18 @@ export async function PUT(
         dataToUpdate.matricula = null;
       }
     }
+    let parsedBreakStart: Date | null = null;
     if (body.breakStart !== undefined) {
-      const parsedBreakStart = body.breakStart ? new Date(body.breakStart) : null;
+      parsedBreakStart = body.breakStart ? new Date(body.breakStart) : null;
       if (parsedBreakStart && Number.isNaN(parsedBreakStart.getTime())) return NextResponse.json({ error: 'Início da pausa inválido' }, { status: 400 });
       dataToUpdate.breakStart = parsedBreakStart;
+    }
+    let parsedBreakEndedAt: Date | null = null;
+    if (body.breakEndedAt !== undefined) {
+      parsedBreakEndedAt = typeof body.breakEndedAt === 'string' ? new Date(body.breakEndedAt) : null;
+      if (!parsedBreakEndedAt || Number.isNaN(parsedBreakEndedAt.getTime())) {
+        return NextResponse.json({ error: 'Fim da pausa inválido' }, { status: 400 });
+      }
     }
     if (body.breakType !== undefined) {
       if (body.breakType !== null && body.breakType !== '' && !['continuous', 'split'].includes(body.breakType)) {
@@ -213,6 +222,20 @@ export async function PUT(
         });
       }
 
+      if (parsedBreakStart) {
+        const breakType = body.breakType === 'split' ? 'split' : 'continuous';
+        await transaction.breakPeriod.upsert({
+          where: { workDayId_startedAt: { workDayId: id, startedAt: parsedBreakStart } },
+          create: { workDayId: id, userId, startedAt: parsedBreakStart, type: breakType },
+          update: { type: breakType },
+        });
+      } else if (body.breakStart === null || body.breakStart === '') {
+        await transaction.breakPeriod.updateMany({
+          where: { workDayId: id, userId, endedAt: null },
+          data: { endedAt: parsedBreakEndedAt ?? new Date() },
+        });
+      }
+
       return transaction.workDay.update({
         where: { id },
         data: dataToUpdate,
@@ -220,6 +243,7 @@ export async function PUT(
           events: true,
           drivingSessions: { orderBy: { createdAt: 'asc' } },
           workActivities: { orderBy: { startedAt: 'asc' } },
+          breakPeriods: { orderBy: { startedAt: 'asc' } },
         },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });

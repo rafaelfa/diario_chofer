@@ -17,22 +17,35 @@ export async function GET(
     const { id } = await params;
 
     // ✅ ISOLAMENTO: Buscar apenas se pertencer ao usuário
-    const workDay = await db.workDay.findFirst({
-      where: {
-        id,
-        userId  // ← OBRIGATÓRIO: isolamento por usuário
-      },
-      include: {
-        events: {
-          orderBy: { time: 'asc' }
-        },
-        drivingSessions: {
-          orderBy: { createdAt: 'asc' }
-        },
-        workActivities: { orderBy: { startedAt: 'asc' } },
-        breakPeriods: { orderBy: { startedAt: 'asc' } },
-      }
-    });
+    const baseInclude = {
+      events: { orderBy: { time: 'asc' as const } },
+      drivingSessions: { orderBy: { createdAt: 'asc' as const } },
+      workActivities: { orderBy: { startedAt: 'asc' as const } },
+    } satisfies Prisma.WorkDayInclude;
+    const includeWithBreakPeriods = {
+      ...baseInclude,
+      breakPeriods: { orderBy: { startedAt: 'asc' as const } },
+    } satisfies Prisma.WorkDayInclude;
+
+    let workDay: Prisma.WorkDayGetPayload<{ include: typeof includeWithBreakPeriods }> | null;
+    try {
+      workDay = await db.workDay.findFirst({
+        where: { id, userId },
+        include: includeWithBreakPeriods,
+      });
+    } catch (error) {
+      const missingBreakPeriodsTable = error instanceof Prisma.PrismaClientKnownRequestError
+        && error.code === 'P2021'
+        && String(error.meta?.table ?? '').includes('break_periods');
+      if (!missingBreakPeriodsTable) throw error;
+
+      log('Tabela break_periods ainda não existe; carregando jornada sem histórico de pausas.');
+      const dayWithoutBreakPeriods = await db.workDay.findFirst({
+        where: { id, userId },
+        include: baseInclude,
+      });
+      workDay = dayWithoutBreakPeriods ? { ...dayWithoutBreakPeriods, breakPeriods: [] } : null;
+    }
 
     if (!workDay) {
       return NextResponse.json({ error: 'Dia não encontrado' }, { status: 404 });

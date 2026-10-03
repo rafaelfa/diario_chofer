@@ -113,6 +113,7 @@ export function useWorkDays() {
 
     if (!res.ok) {
       const data = await res.json();
+      if (res.status === 409) await loadData();
       throw new Error(data.error || 'Erro ao iniciar dia');
     }
 
@@ -120,7 +121,7 @@ export function useWorkDays() {
     setCurrentDay(newDay);
     setWorkDays(prev => [newDay, ...prev]);
     return newDay;
-  }, []);
+  }, [loadData]);
 
   /** Finaliza o dia em curso */
   const endDay = useCallback(

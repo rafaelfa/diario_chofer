@@ -27,16 +27,37 @@ export async function GET(request: NextRequest) {
       where.date = { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) };
     }
 
-    const workDays = await db.workDay.findMany({
-      where,
-      include: {
-        events:          { orderBy: { time: 'asc' } },
-        drivingSessions: { orderBy: { createdAt: 'asc' } },
-        workActivities:  { orderBy: { startedAt: 'asc' } },
-        breakPeriods:    { orderBy: { startedAt: 'asc' } },
-      },
-      orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
-    });
+    const baseInclude = {
+      events: { orderBy: { time: 'asc' as const } },
+      drivingSessions: { orderBy: { createdAt: 'asc' as const } },
+      workActivities: { orderBy: { startedAt: 'asc' as const } },
+    } satisfies Prisma.WorkDayInclude;
+    const includeWithBreakPeriods = {
+      ...baseInclude,
+      breakPeriods: { orderBy: { startedAt: 'asc' as const } },
+    } satisfies Prisma.WorkDayInclude;
+
+    let workDays: Prisma.WorkDayGetPayload<{ include: typeof includeWithBreakPeriods }>[];
+    try {
+      workDays = await db.workDay.findMany({
+        where,
+        include: includeWithBreakPeriods,
+        orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
+      });
+    } catch (error) {
+      const missingBreakPeriodsTable = error instanceof Prisma.PrismaClientKnownRequestError
+        && error.code === 'P2021'
+        && String(error.meta?.table ?? '').includes('break_periods');
+      if (!missingBreakPeriodsTable) throw error;
+
+      log('Tabela break_periods ainda não existe; carregando jornadas sem histórico de pausas.');
+      const daysWithoutBreakPeriods = await db.workDay.findMany({
+        where,
+        include: baseInclude,
+        orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
+      });
+      workDays = daysWithoutBreakPeriods.map(day => ({ ...day, breakPeriods: [] }));
+    }
 
     const workDaysWithCalculations = workDays.map(day => {
       const sessions = day.drivingSessions ?? [];
@@ -195,7 +216,7 @@ export async function POST(request: NextRequest) {
                 },
               }),
         },
-        include: { events: true, drivingSessions: true, workActivities: true, breakPeriods: true },
+        include: { events: true, drivingSessions: true, workActivities: true },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
